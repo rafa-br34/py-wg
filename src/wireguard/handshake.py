@@ -165,6 +165,9 @@ class Handshake:
 		if self.initiator:
 			return
 
+		# Check if the cookie is still valid
+		self._update_cookie_key()
+
 		if not self.cookie_expected and mac_b == TEMPLATE_EMPTY_MAC:
 			return
 

@@ -16,7 +16,7 @@ from utilities import iter_vec2, compare_list
 
 
 class UnitBitwiseCodecs(unittest.TestCase):
-	def test_codec_ver_ihl(self):
+	def test_codec_offset_control(self):
 		for offset, control in iter_vec2(0x000F, 0x0FFF):
 			encoded = tcp_encode_offset_control(offset, control)
 			dec_offset, dec_control = tcp_decode_offset_control(encoded)
@@ -56,15 +56,67 @@ class UnitOptionsCodecs(unittest.TestCase):
 			"Decoded results differ between the original and second re-encoding",
 		)
 
+	@staticmethod
+	def _random_edge_pairs(length: int) -> list[tuple[int, int]]:
+		pairs = []
+
+		for _ in range(length):
+			pairs.append((random.randrange(0x00000000, 0xFFFFFFFF), random.randrange(0x00000000, 0xFFFFFFFF)))
+
+		return pairs
+
+	@staticmethod
+	def _rand_opt_mss():
+		return TCPOption(kind = TCPOptionKind.OPT_MSS, mss = random.randrange(0x0000, 0xFFFF))
+
+	@staticmethod
+	def _rand_opt_window_scale():
+		return TCPOption(kind = TCPOptionKind.OPT_WINDOW, window_scale = random.randrange(0x00, 0xFF))
+
+	@staticmethod
+	def _rand_opt_sack():
+		pairs = UnitOptionsCodecs._random_edge_pairs(random.randrange(0, (255 - 2) // 8))
+
+		return TCPOption(kind = TCPOptionKind.OPT_SACK, edge_pairs = pairs)
+
+	@staticmethod
+	def _rand_modify_opts(options: list[TCPOption], generator):
+		if random.random() > 0.40:
+			options.append(generator())
+		elif len(options):
+			options.pop()
+
 	def test_options_mss(self):
 		options = []
 
 		for _ in range(32):
-			if random.random() > 0.45:
-				options.append(TCPOption(kind = TCPOptionKind.OPT_MSS, mss = random.randrange(0x0000, 0xFFFF)))
-			elif len(options):
-				options.pop()
+			self._rand_modify_opts(options, self._rand_opt_mss)
+			self._check_state_change(options)
 
+	def test_options_window_scale(self):
+		options = []
+
+		for _ in range(32):
+			self._rand_modify_opts(options, self._rand_opt_window_scale)
+			self._check_state_change(options)
+
+	def test_options_sack(self):
+		options = []
+
+		for _ in range(32):
+			self._rand_modify_opts(options, self._rand_opt_sack)
+			self._check_state_change(options)
+
+	def test_options_fuzzing(self):
+		candidates = [
+			self._rand_opt_mss,
+			self._rand_opt_window_scale,
+			self._rand_opt_sack,
+		]
+		options = []
+
+		for _ in range(256):
+			self._rand_modify_opts(options, random.choice(candidates))
 			self._check_state_change(options)
 
 

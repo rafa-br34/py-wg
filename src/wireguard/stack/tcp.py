@@ -99,7 +99,7 @@ class TCPOption(SimpleNamespace):
 
 class TCPOptionCodec:
 	kind: int
-	size: int | None
+	size: Optional[int]
 
 	@staticmethod
 	def encode(opt: TCPOption):
@@ -234,7 +234,7 @@ def tcp_opt_encode(options: list[TCPOption]):
 
 		buffer[pointer:pointer + padding] = bytes([pad_val]) * padding
 
-	return buffer
+	return buffer.tobytes()
 
 
 def tcp_opt_decode(options: bytes | memoryview):
@@ -270,6 +270,9 @@ def tcp_opt_decode(options: bytes | memoryview):
 		codec = tcp_opt_registry_get(kind)
 
 		if codec:
+			if codec.size is not None and codec.size != size:
+				raise ValueError(f"Size mismatch codec expects size of {codec.size} got {size}")
+
 			codec.decode(option)
 
 		yield option

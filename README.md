@@ -12,7 +12,7 @@ A pure python implementation of the WireGuard protocol.
 
 ## Motivation
 
-Existing Python libraries for WireGuard rely on the system daemon, which limits flexibility, requires root access, and causes global network changes. A user-mode implementation avoids these issues, making setup easier and safer for isolated use cases. It also enables custom packet injection (IPv4/IPv6) without raw sockets, useful for things like anonymous SYN scans, dynamic IP hopping for scraping, or building VPN-like tools without system-wide impact.
+Existing Python libraries for WireGuard rely on the system daemon, which limits flexibility, requires root access, and causes global network changes. A user-mode implementation avoids these issues, making setup easier and safer for isolated use cases. It also enables custom packet injection (IPv4/IPv6) without raw sockets, making it useful for things like anonymous SYN scans, dynamic IP hopping for scraping, or building VPN-like tools without system-wide impact.
 
 ## Performance
 
@@ -26,6 +26,7 @@ The following references were used while building this project:
 - [WireGuard website](https://www.wireguard.com)
 - [wireguard-lwip](https://github.com/smartalock/wireguard-lwip) by [smartalock](https://github.com/smartalock)
 - [RFC 791](https://datatracker.ietf.org/doc/html/rfc791) (IPv4 standard)
+- [RFC 8200](https://datatracker.ietf.org/doc/html/rfc8200) (IPv6 standard)
 - [IANA DSCP & ECN](https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml) (IPv4/IPv6 DSCP and ECN)
 - [IANA Protocol Numbers](https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml) (IPv4/IPv6 Protocol Numbers)
 - [RFC 768](https://datatracker.ietf.org/doc/html/rfc768) (UDP standard)

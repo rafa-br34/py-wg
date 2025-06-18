@@ -1,19 +1,22 @@
 from src.wireguard.stack.internet_protocols import InternetProtocol
 from src.wireguard.stack.ipv4 import (
-	ipv4_encode_ver_ihl, ipv4_decode_ver_ihl,
-	ipv4_encode_dscp_ecn, ipv4_decode_dscp_ecn,
-	ipv4_encode_flags_offset, ipv4_decode_flags_offset,
-
+	ipv4_encode_ver_ihl,
+	ipv4_decode_ver_ihl,
+	ipv4_encode_dscp_ecn,
+	ipv4_decode_dscp_ecn,
+	ipv4_encode_flags_offset,
+	ipv4_decode_flags_offset,
 	IPv4ServiceType,
 	IPv4Congestion,
 	IPv4Flags,
-	IPv4Packet
+	IPv4Packet,
 )
 
 import unittest
 import random
 
 from utilities import iter_vec2
+
 
 class UnitBitwiseCodecs(unittest.TestCase):
 	def test_codec_ver_ihl(self):
@@ -37,8 +40,13 @@ class UnitBitwiseCodecs(unittest.TestCase):
 			encoded = ipv4_encode_flags_offset(flags, offset)
 			dec_flags, dec_offset = ipv4_decode_flags_offset(encoded)
 
-			self.assertEqual(flags, dec_flags, f"Failed to encode/decode header flags. Got {dec_flags} expected {flags}")
-			self.assertEqual(offset, dec_offset, f"Failed to encode/decode fragment offset. Got {dec_offset} expected {offset}")
+			self.assertEqual(
+				flags, dec_flags, f"Failed to encode/decode header flags. Got {dec_flags} expected {flags}"
+			)
+			self.assertEqual(
+				offset, dec_offset, f"Failed to encode/decode fragment offset. Got {dec_offset} expected {offset}"
+			)
+
 
 class UnitPacketCodec(unittest.TestCase):
 	def test_codec_packet(self):
@@ -85,7 +93,8 @@ class UnitPacketCodec(unittest.TestCase):
 
 			self.assertEqual(send_pkt.__repr__(), recv_pkt.__repr__(), "Representation results differ")
 
+
 UNIT_CLASSES = [
 	UnitBitwiseCodecs,
-	UnitPacketCodec
+	UnitPacketCodec,
 ]

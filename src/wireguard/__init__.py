@@ -1,8 +1,8 @@
 from .wireguard import (
-	KeyPair,
-	Handshake,
 	Peer,
-
 	PrivateKey,
-	PublicKey
+	PublicKey,
 )
+
+from .handshake import Handshake
+from .keypair import KeyPair

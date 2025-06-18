@@ -4,6 +4,7 @@ class WireguardException(Exception):
 	"""
 	pass
 
+
 class WireguardStateException(WireguardException):
 	"""
 		Some invalid state was reached.
@@ -11,11 +12,13 @@ class WireguardStateException(WireguardException):
 	"""
 	pass
 
+
 class WireguardHandshakeException(WireguardException):
 	"""
 		Exceptions raised during handshake.
 	"""
 	pass
+
 
 class WireguardCodecException(WireguardException):
 	pass

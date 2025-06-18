@@ -6,10 +6,12 @@ from enum import IntEnum
 from .internet_protocols import InternetProtocol, internet_protocol_to_str
 from .internet_checksum import Checksum
 
+
 # https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml#dscp-registry-2
 # For configuration guidelines and how to use these:
 # https://en.wikipedia.org/wiki/Differentiated_services#Classification_and_marking
 # RFC 4594
+# yapf: disable
 class IPv4ServiceType(IntEnum):
 	ST_CS0         = 0x00 # Standard forwarding
 	ST_LE          = 0x01 # Lower effort forwarding
@@ -34,6 +36,8 @@ class IPv4ServiceType(IntEnum):
 	ST_VOICE_ADMIT = 0x2C # Capacity-admitted traffic
 	ST_CS6         = 0x30 # Routing protocols
 	ST_CS7         = 0x38 # Reserved for future use
+# yapf: enable
+
 
 def ipv4_dscp_to_str(dscp: Optional[IPv4ServiceType | int] = None):
 	if dscp is None:
@@ -47,50 +51,82 @@ def ipv4_dscp_to_str(dscp: Optional[IPv4ServiceType | int] = None):
 	except ValueError:
 		return "Unknown"
 
+
 # https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml#ecn-field
+# yapf: disable
 class IPv4Congestion(IntEnum):
 	ECN_INCAPABLE   = 0b00 # Incapable of ECN
 	ECN_CAPABLE_EXP = 0b01 # Capable of ECN, experimental use only
 	ECN_CAPABLE     = 0b10 # Capable of ECN
 	ECN_CONGESTED   = 0b11 # Congestion experienced
+# yapf: enable
 
+
+# yapf: disable
 class IPv4Flags(IntEnum):
 	FG_RESERVED = 1 << 0 # Reserved flag
 	FG_DF       = 1 << 1 # Don't fragment
 	FG_MF       = 1 << 2 # More fragments
+# yapf: enable
+
 
 def ipv4_flags_to_str(flags: Optional[IPv4Flags | int] = None):
-	if flags == None or flags == 0:
+	if flags is None or flags == 0:
 		return "None"
 	else:
 		return " | ".join(filter(None, [flags & flag and flag.name or None for flag in IPv4Flags]))
 
+
 def ipv4_encode_ver_ihl(ver: int, ihl: int):
 	return (ihl & 0x0F) | ((ver & 0x0F) << 4)
+
+
 def ipv4_decode_ver_ihl(value: int):
 	return (value & 0xF0) >> 4, (value & 0x0F)
 
+
 def ipv4_encode_dscp_ecn(dscp: int, ecn: int):
 	return (ecn & 0x03) | ((dscp & 0x3F) << 2)
+
+
 def ipv4_decode_dscp_ecn(value: int):
 	return (value & 0xFC) >> 2, (value & 0x03)
 
+
 def ipv4_encode_flags_offset(flags: int, offset: int):
 	return (offset & 0x1FFF) | ((flags & 0x07) << 13)
+
+
 def ipv4_decode_flags_offset(value: int):
 	return (value & 0xE000) >> 13, (value & 0x1FFF)
 
-IPV4_STRUCT_HDR_PARAMS = "!BBHHHBB"
-IPV4_STRUCT_HDR_CHECKSUM = "!H"
+
+# yapf: disable
+IPV4_STRUCT_HDR_PARAMS    = "!BBHHHBB"
+IPV4_STRUCT_HDR_CHECKSUM  = "!H"
 IPV4_STRUCT_HDR_ADDRESSES = "!II"
 
-IPV4_LENGTH_HDR_PARAMS = struct.calcsize(IPV4_STRUCT_HDR_PARAMS)
-IPV4_LENGTH_HDR_CHECKSUM = struct.calcsize(IPV4_STRUCT_HDR_CHECKSUM)
+IPV4_LENGTH_HDR_PARAMS    = struct.calcsize(IPV4_STRUCT_HDR_PARAMS)
+IPV4_LENGTH_HDR_CHECKSUM  = struct.calcsize(IPV4_STRUCT_HDR_CHECKSUM)
 IPV4_LENGTH_HDR_ADDRESSES = struct.calcsize(IPV4_STRUCT_HDR_ADDRESSES)
-IPV4_LENGTH_HDR = IPV4_LENGTH_HDR_PARAMS + IPV4_LENGTH_HDR_CHECKSUM + IPV4_LENGTH_HDR_ADDRESSES
+IPV4_LENGTH_HDR           = IPV4_LENGTH_HDR_PARAMS + IPV4_LENGTH_HDR_CHECKSUM + IPV4_LENGTH_HDR_ADDRESSES
+# yapf: enable
+
 
 class IPv4Packet:
-	def __init__(self, src_addr: Optional[int] = None, dst_addr: Optional[int] = None, protocol: Optional[InternetProtocol | int] = None, payload = None, dscp = IPv4ServiceType.ST_CS0, ecn = IPv4Congestion.ECN_INCAPABLE, ident = 0x0000, flags = 0b000, frag_offset = 0, ttl = 128):
+	def __init__(
+		self,
+		src_addr: Optional[int] = None,
+		dst_addr: Optional[int] = None,
+		protocol: Optional[InternetProtocol | int] = None,
+		payload = None,
+		dscp = IPv4ServiceType.ST_CS0,
+		ecn = IPv4Congestion.ECN_INCAPABLE,
+		ident = 0x0000,
+		flags = 0b000,
+		frag_offset = 0,
+		ttl = 128
+	):
 		self._checksum_state = Checksum()
 
 		self.checksum_valid: Optional[bool] = None
@@ -116,7 +152,7 @@ class IPv4Packet:
 		ttl = self.ttl
 		protocol = internet_protocol_to_str(self.protocol)
 		checksum = f"0x{self.checksum:04X}"
-		checksum_valid = self.checksum_valid == None and "Unknown" or self.checksum_valid
+		checksum_valid = self.checksum_valid is None and "Unknown" or self.checksum_valid
 
 		return f"IPv4Packet(dscp = {dscp}, ecn = {ecn}, ident = {ident}, flags = {flags}, frag_offset = {offset}, ttl = {ttl}, protocol = {protocol}, checksum = {checksum}, checksum_valid = {checksum_valid})"
 
@@ -125,13 +161,13 @@ class IPv4Packet:
 		payload = self.payload
 
 		if isinstance(payload, bytes):
-			if protocol != None:
+			if protocol is not None:
 				return payload, protocol
 			else:
 				raise ValueError("Cannot use a bytes payload without a protocol value set")
 		elif payload:
 			return payload.encode_packet_ipv4(self), payload.protocol_number
-		elif payload == None:
+		elif payload is None:
 			raise ValueError("Cannot encode a IPv4 packet without a payload set")
 		else:
 			raise ValueError("Unknown payload type")
@@ -153,13 +189,9 @@ class IPv4Packet:
 			self.ident,
 			ipv4_encode_flags_offset(self.flags, self.frag_offset),
 			self.ttl,
-			protocol
+			protocol,
 		)
-		hdr_addresses = struct.pack(
-			IPV4_STRUCT_HDR_ADDRESSES,
-			self.src_addr,
-			self.dst_addr
-		)
+		hdr_addresses = struct.pack(IPV4_STRUCT_HDR_ADDRESSES, self.src_addr, self.dst_addr)
 		# Create hdr_options here
 
 		checksum_state = self._checksum_state
@@ -169,10 +201,7 @@ class IPv4Packet:
 
 		checksum = checksum_state.finalize()
 
-		hdr_checksum = struct.pack(
-			IPV4_STRUCT_HDR_CHECKSUM,
-			checksum
-		)
+		hdr_checksum = struct.pack(IPV4_STRUCT_HDR_CHECKSUM, checksum)
 
 		self.checksum = checksum
 		self.checksum_valid = True
@@ -182,13 +211,13 @@ class IPv4Packet:
 	def decode_packet(self, packet: bytes, verify_checksum = False):
 		pointer = 0
 
-		hdr_params    = packet[pointer : pointer + IPV4_LENGTH_HDR_PARAMS]
+		hdr_params = packet[pointer:pointer + IPV4_LENGTH_HDR_PARAMS]
 		pointer += IPV4_LENGTH_HDR_PARAMS
 
-		hdr_checksum  = packet[pointer : pointer + IPV4_LENGTH_HDR_CHECKSUM]
+		hdr_checksum = packet[pointer:pointer + IPV4_LENGTH_HDR_CHECKSUM]
 		pointer += IPV4_LENGTH_HDR_CHECKSUM
 
-		hdr_addresses = packet[pointer : pointer + IPV4_LENGTH_HDR_ADDRESSES]
+		hdr_addresses = packet[pointer:pointer + IPV4_LENGTH_HDR_ADDRESSES]
 		pointer += IPV4_LENGTH_HDR_ADDRESSES
 
 		checksum_received = struct.unpack(IPV4_STRUCT_HDR_CHECKSUM, hdr_checksum)[0]
@@ -207,7 +236,16 @@ class IPv4Packet:
 
 		self.checksum = checksum_received
 
-		(ver_ihl, dscp_ecn, pkt_size, ident, flags_offset, ttl, protocol) = struct.unpack(IPV4_STRUCT_HDR_PARAMS, hdr_params)
+		(
+			ver_ihl,
+			dscp_ecn,
+			pkt_size,
+			ident,
+			flags_offset,
+			ttl,
+			protocol,
+		) = struct.unpack(IPV4_STRUCT_HDR_PARAMS, hdr_params)
+
 		(src_addr, dst_addr) = struct.unpack(IPV4_STRUCT_HDR_ADDRESSES, hdr_addresses)
 
 		ver, ihl = ipv4_decode_ver_ihl(ver_ihl)
@@ -226,10 +264,7 @@ class IPv4Packet:
 		payload_len = pkt_size - ihl * 4
 
 		# @note Pointer stops being updated here
-		self._decode_payload(
-			packet[pointer : pointer + payload_len],
-			protocol
-		)
+		self._decode_payload(packet[pointer:pointer + payload_len], protocol)
 
 		self.src_addr = src_addr
 		self.dst_addr = dst_addr

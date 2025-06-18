@@ -8,15 +8,17 @@ from .functions import wg_hash
 class MessageTypes(IntEnum):
 	MSG_HANDSHAKE_REQ = 0x01
 	MSG_HANDSHAKE_RES = 0x02
-	MSG_COOKIE_REPLY  = 0x03
-	MSG_TRANSPORT     = 0x04
+	MSG_COOKIE_REPLY = 0x03
+	MSG_TRANSPORT = 0x04
 
+
+# yapf: disable
 TEMPLATE_CONSTRUCTION = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s"
-TEMPLATE_IDENTIFIER = b"WireGuard v1 zx2c4 Jason@zx2c4.com"
-TEMPLATE_LABEL_MAC = b"mac1----"
+TEMPLATE_IDENTIFIER   = b"WireGuard v1 zx2c4 Jason@zx2c4.com"
+TEMPLATE_LABEL_MAC    = b"mac1----"
 TEMPLATE_LABEL_COOKIE = b"cookie--"
-TEMPLATE_EMPTY_MAC = b'\x00' * 16
-TEMPLATE_EMPTY_KEY = b'\x00' * 32
+TEMPLATE_EMPTY_MAC    = b'\x00' * 16
+TEMPLATE_EMPTY_KEY    = b'\x00' * 32
 
 STATE_REKEY_AFTER_MSGS   = 2 ** 60
 STATE_REJECT_AFTER_MSGS  = 2 ** 64 - 2 ** 13 - 1
@@ -40,7 +42,6 @@ STRUCT_COOKIE_REPLY  = "<I24s32s"
 # u32 Receiver, u64 Counter
 STRUCT_TRANSPORT     = "<IQ" # Append data
 
-
 LEN_HEADER              = struct.calcsize(STRUCT_HEADER)
 LEN_MACS                = struct.calcsize(STRUCT_MACS)
 LEN_HANDSHAKE_REQ       = struct.calcsize(STRUCT_HANDSHAKE_REQ)
@@ -49,5 +50,12 @@ LEN_HANDSHAKE_RES       = struct.calcsize(STRUCT_HANDSHAKE_RES)
 LEN_COOKIE_REPLY        = struct.calcsize(STRUCT_COOKIE_REPLY)
 LEN_TRANSPORT           = struct.calcsize(STRUCT_TRANSPORT)
 
-INITIAL_CHAINING_KEY = wg_hash(TEMPLATE_CONSTRUCTION)
+# Pre-compute header bytes
+HDR_HANDSHAKE_REQ = struct.pack(STRUCT_HEADER, MessageTypes.MSG_HANDSHAKE_REQ)
+HDR_HANDSHAKE_RES = struct.pack(STRUCT_HEADER, MessageTypes.MSG_HANDSHAKE_RES)
+HDR_COOKIE_REPLY  = struct.pack(STRUCT_HEADER, MessageTypes.MSG_COOKIE_REPLY)
+HDR_TRANSPORT     = struct.pack(STRUCT_HEADER, MessageTypes.MSG_TRANSPORT)
+
+INITIAL_CHAINING_KEY   = wg_hash(TEMPLATE_CONSTRUCTION)
 INITIAL_HANDSHAKE_HASH = wg_hash(INITIAL_CHAINING_KEY + TEMPLATE_IDENTIFIER)
+# yapf: enable

@@ -8,8 +8,9 @@ TEST_UNITS = [
 	"unit_internet_checksum",
 	"unit_ipv4",
 	"unit_tcp",
-	"unit_wireguard"
+	"unit_wireguard",
 ]
+
 
 def print_env_info():
 	print(f"Python: {sys.version}")
@@ -18,6 +19,7 @@ def print_env_info():
 	print(f"Architecture: {platform.architecture()}")
 	print(f"Implementation: {platform.python_implementation()}")
 	print(LINE_SEPARATOR)
+
 
 def load_modules(loader: unittest.TestLoader, suite: unittest.TestSuite):
 	pad = "   "
@@ -35,16 +37,18 @@ def load_modules(loader: unittest.TestLoader, suite: unittest.TestSuite):
 
 	print(LINE_SEPARATOR)
 
+
 def run_tests():
 	print_env_info()
 
 	loader = unittest.TestLoader()
 	suite = unittest.TestSuite()
-	
+
 	load_modules(loader, suite)
 
 	runner = unittest.TextTestRunner()
 	runner.run(suite)
+
 
 if __name__ == "__main__":
 	run_tests()

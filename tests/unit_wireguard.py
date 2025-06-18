@@ -1,13 +1,12 @@
-import src.wireguard.wireguard as wg
+import src.wireguard as wg
 
 import unittest
 import random
 
 from nacl.public import (
 	PrivateKey,
-	PublicKey
+	PublicKey,
 )
-
 
 
 class UnitHandshake(unittest.TestCase):
@@ -29,12 +28,18 @@ class UnitHandshake(unittest.TestCase):
 	def check_derivation(self, src_handshake: wg.Handshake, dst_handshake: wg.Handshake):
 		src_keypair = self.src_keypair
 		dst_keypair = self.dst_keypair
-	
+
 		src_handshake.derive_keypair(src_keypair)
 		dst_handshake.derive_keypair(dst_keypair)
 
-		self.assertEqual(src_keypair.send_key, dst_keypair.recv_key, "Key derivation failed src_keypair.send_key != dst_keypair.recv_key, preshared key not set.")
-		self.assertEqual(dst_keypair.send_key, src_keypair.recv_key, "Key derivation failed dst_keypair.send_key != src_keypair.recv_key, preshared key not set.")
+		self.assertEqual(
+			src_keypair.send_key, dst_keypair.recv_key,
+			"Key derivation failed src_keypair.send_key != dst_keypair.recv_key, preshared key not set."
+		)
+		self.assertEqual(
+			dst_keypair.send_key, src_keypair.recv_key,
+			"Key derivation failed dst_keypair.send_key != src_keypair.recv_key, preshared key not set."
+		)
 
 	def test_key_derivation(self):
 		src_handshake = self.src_handshake
@@ -92,7 +97,7 @@ class UnitHandshake(unittest.TestCase):
 			self.check_handshake_equality(src_handshake, dst_handshake)
 			self.check_derivation(src_handshake, dst_handshake)
 
-UNIT_CLASSES = [
-	UnitHandshake
-]
 
+UNIT_CLASSES = [
+	UnitHandshake,
+]

@@ -1,7 +1,9 @@
 from typing import Optional
 from enum import IntEnum
 
+
 # https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml#protocol-numbers-1
+# yapf: disable
 class InternetProtocol(IntEnum):
 	IP_HOPOPT             = 0x00 # IPv6 Hop-by-Hop Option
 	IP_ICMPV4             = 0x01 # Internet Control Message Protocol
@@ -128,7 +130,7 @@ class InternetProtocol(IntEnum):
 	IP_SM                 = 0x7A # Simple Multicast Protocol (deprecated)
 	IP_PTP                = 0x7B # Performance Transparency Protocol
 	IP_IS_IS_OVER_IPV4    = 0x7C # Intermediate System to Intermediate System over IPv4
-	IP_FIRE               = 0x7D # Flexible Intra-AS Routing Environment 
+	IP_FIRE               = 0x7D # Flexible Intra-AS Routing Environment
 	IP_CRTP               = 0x7E # Combat Radio Transport Protocol
 	IP_CRUDP              = 0x7F # Combat Radio User Datagram
 	IP_SSCOPMCE           = 0x80 # Service-Specific Connection-Oriented Protocol in a Multilink and Connectionless Environment
@@ -137,10 +139,10 @@ class InternetProtocol(IntEnum):
 	IP_PIPE               = 0x83 # Private IP Encapsulation within IP
 	IP_SCTP               = 0x84 # Stream Control Transmission Protocol
 	IP_FC                 = 0x85 # Fibre Channel
-	IP_RSVP_E2E_IGNORE    = 0x86 # Reservation Protocol (RSVP) End-to-End Ignore 
+	IP_RSVP_E2E_IGNORE    = 0x86 # Reservation Protocol (RSVP) End-to-End Ignore
 	IP_MOBILITY_HEADER    = 0x87 # Mobility Extension Header for IPv6
 	IP_UDP_LITE           = 0x88 # Lightweight User Datagram Protocol
-	IP_MPLS_IN_IP         = 0x89 # Multiprotocol Label Switching Encapsulated in IP 
+	IP_MPLS_IN_IP         = 0x89 # Multiprotocol Label Switching Encapsulated in IP
 	IP_MANET              = 0x8A # MANET Protocols
 	IP_HIP                = 0x8B # Host Identity Protocol
 	IP_SHIM6              = 0x8C # Shim6 Protocol
@@ -154,6 +156,8 @@ class InternetProtocol(IntEnum):
 	# 0x94-0xFC Reserved
 	# 0xFD, 0xFE Use for testing and experimentation
 	# 0xFF Reserved
+# yapf: enable
+
 
 def internet_protocol_to_str(protocol: Optional[InternetProtocol | int]):
 	if protocol is None:

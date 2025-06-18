@@ -1,5 +1,5 @@
 class PacketReplay:
-	def __init__(self, width=32):
+	def __init__(self, width = 32):
 		assert width >= 32 and width <= 64
 		self.reset(width)
 
@@ -32,7 +32,7 @@ class PacketReplay:
 
 			if diff >= bitmap_width:
 				return False # Too far behind
-			
+
 			if bitmap & (1 << diff):
 				return False # Already seen
 			else:

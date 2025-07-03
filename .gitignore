@@ -1,2 +1,5 @@
 __pycache__/
 experimentation/
+dist/
+
+*.egg-info

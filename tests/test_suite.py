@@ -8,6 +8,7 @@ TEST_UNITS = [
 	"unit_internet_checksum",
 	"unit_ipv4",
 	"unit_tcp",
+	"unit_udp",
 	"unit_wireguard",
 ]
 

@@ -1,4 +1,5 @@
 import src.wireguard as wg
+
 from src.wireguard.constants import TEMPLATE_EMPTY_MAC, STATE_COOKIE_LIFETIME, LEN_MACS
 from src.wireguard.exceptions import WireguardHandshakeException
 
@@ -22,12 +23,10 @@ def check_derivation(unit: unittest.TestCase, src_handshake: wg.Handshake, dst_h
 	dst_handshake.derive_keypair(dst_keypair)
 
 	unit.assertEqual(
-		src_keypair.send_key, dst_keypair.recv_key,
-		"Key derivation failed src_keypair.send_key != dst_keypair.recv_key, preshared key not set."
+		src_keypair.send_key, dst_keypair.recv_key, "Key derivation failed src_keypair.send_key != dst_keypair.recv_key"
 	)
 	unit.assertEqual(
-		dst_keypair.send_key, src_keypair.recv_key,
-		"Key derivation failed dst_keypair.send_key != src_keypair.recv_key, preshared key not set."
+		dst_keypair.send_key, src_keypair.recv_key, "Key derivation failed dst_keypair.send_key != src_keypair.recv_key"
 	)
 
 

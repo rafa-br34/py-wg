@@ -29,7 +29,7 @@ A documentation will be added in the future, but for now, the examples should pr
 
 ## Testing and troubleshooting
 
-If you encounter any issues while using the library please first run the test suite to check if any tests are failing. The tests can be run by using `python run_tests.py` in the root directory of the project.
+If you encounter any issues while using the library run the test suite to check if any tests are failing. The tests can be run by using `python run_tests.py` in the root directory of the project.
 If anything fails or doesn't work properly please feel free to open an issue on the repository with the details of the issue and the output of the tests.
 
 ## References

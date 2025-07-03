@@ -10,7 +10,7 @@
 
 ## Configuring and running the examples
 
-To configure the examples fill the `.env-template` file with the appropriate values and rename it to `.env`. Each example will read the configuration from this file.
+To setup the wireguard parameters `.env-template` file with the appropriate values and rename it to `.env`. The examples will read the configuration from this file.
 Here's a brief overview of the required variables:
 
 - `WG_INITIATOR_KEY_PRI`: The private key of the initiator.
@@ -24,7 +24,7 @@ If you desire to run the examples with the module installed, you will first need
 
 ### Configuring with Mullvad
 
-When using Mullvad as the VPN provider manually generate a configuration file, the generated configuration file might look like this:
+When using Mullvad for the WireGuard config manually generate a configuration file. The generated configuration file might look like this:
 
 ```ini
 [Interface]
@@ -46,7 +46,7 @@ Where:
 - `PublicKey` is the `WG_RESPONDER_KEY_PUB`.
 - `Endpoint` is the `WG_RESPONDER_ADDR` and `WG_RESPONDER_PORT`.
 
-Alternatively if you don't want to delete a device, you can manually request the Mullvad API to regenerate the keys for a device:
+Alternatively if you don't want to delete a device, you can manually request the Mullvad API to regenerate the keys for a device, like so:
 
 ```python
 import requests
@@ -91,11 +91,11 @@ for device in result.json():
     break
 ```
 
-To get the servers simply open `https://api.mullvad.net/www/relays/all/` in your browser and select the desired server.
+To get the servers simply open [api.mullvad.net/www/relays/all](https://api.mullvad.net/www/relays/all/) in your browser and select the desired server.
 
 ## List of examples and their purpose
 
-- `udp-round-trip.py`: Demonstrates how to connect a WireGuard peer, and send UDP packets to DNS servers using `dnslib`.
+- `udp-round-trip.py`: Demonstrates how to connect a WireGuard peer and send UDP packets to DNS servers using `dnslib`.
 
 In the future more examples will be added to demonstrate different use cases of the library, such as:
 
@@ -103,4 +103,4 @@ In the future more examples will be added to demonstrate different use cases of 
 - Performing a ICMP ping scan over WireGuard.
 - Creating a WireGuard server.
 - Establishing a 2-way TCP connection over WireGuard.
-- Performing a full HTTP(S) request over WireGuard + requests.
+- Performing a full HTTP(S) request over WireGuard + `requests`.

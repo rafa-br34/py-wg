@@ -3,13 +3,10 @@ import struct
 import time
 
 from typing import Optional
-from nacl.public import (PrivateKey, PublicKey)
+from nacl.public import PrivateKey, PublicKey
 
-from .exceptions import (WireguardException)
-from .functions import (
-	wg_aead_encrypt,
-	wg_aead_decrypt,
-)
+from .exceptions import WireguardException
+from .functions import wg_aead_encrypt, wg_aead_decrypt
 from .constants import (
 	MessageTypes,
 	STRUCT_HEADER,

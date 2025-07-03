@@ -8,15 +8,29 @@ A pure python implementation of the WireGuard protocol.
   - [Table of contents](#table-of-contents)
   - [Motivation](#motivation)
   - [Performance](#performance)
+  - [Usage](#usage)
+  - [Testing and troubleshooting](#testing-and-troubleshooting)
   - [References](#references)
 
 ## Motivation
 
-Existing Python libraries for WireGuard rely on the system daemon, which limits flexibility, requires root access, and causes global network changes. A user-mode implementation avoids these issues, making setup easier and safer for isolated use cases. It also enables custom packet injection (IPv4/IPv6) without raw sockets, making it useful for things like anonymous SYN scans, dynamic IP hopping for scraping, or building VPN-like tools without system-wide impact.
+Existing Python libraries for WireGuard rely on the system daemon, which limits flexibility, requires root access, and causes global network changes. A user-mode implementation avoids these issues, making setup easier and safer for isolated use cases. It also enables custom packet injection (IPv4/IPv6) without raw sockets, making it useful for things like anonymous SYN scans (given proper spoofing), dynamic IP hopping for scraping, or building VPN-like tools without system-wide impact.
+And finally, because why not? It's a fun project to learn about the WireGuard protocol and networking in general.
 
 ## Performance
 
 One major drawback of this implementation is its speed. While rewriting it in a faster language like C++ with Python bindings could solve this, it would also add significant complexity. For now, the focus is on optimizing the existing Python code as much as possible.
+
+## Usage
+
+For usage examples please refer to the [examples](/examples/README.md) directory. The examples demonstrate how to use the library to create WireGuard peers, encode packets, send packets, and manage inbound packets.
+
+A documentation will be added in the future, but for now, the examples should provide enough information to get started.
+
+## Testing and troubleshooting
+
+If you encounter any issues while using the library please first run the test suite to check if any tests are failing. The tests can be run by using `python run_tests.py` in the root directory of the project.
+If anything fails or doesn't work properly please feel free to open an issue on the repository with the details of the issue and the output of the tests.
 
 ## References
 

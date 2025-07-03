@@ -1,4 +1,4 @@
-from src.wireguard.stack.internet_protocols import InternetProtocol
+from wireguard.stack.protocols import InternetProtocol
 from src.wireguard.stack.ipv4 import (
 	ipv4_encode_ver_ihl,
 	ipv4_decode_ver_ihl,

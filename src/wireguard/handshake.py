@@ -225,8 +225,7 @@ class Handshake:
 		pair.recv_count = 0
 		pair.recv_last = self.handshake_done
 
-		pair.created = self.handshake_done
-		pair.valid = True
+		pair.lifetime = self.handshake_done
 
 		pair.replay.reset()
 

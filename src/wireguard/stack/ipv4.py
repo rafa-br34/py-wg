@@ -3,7 +3,7 @@ import struct
 from typing import Optional
 from enum import IntEnum
 
-from .internet_protocols import InternetProtocol, internet_protocol_to_str
+from .protocols import InternetProtocol, internet_protocol_to_str
 from .internet_checksum import Checksum
 
 

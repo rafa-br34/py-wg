@@ -2,7 +2,7 @@ import struct
 
 from typing import Optional
 
-from .internet_protocols import InternetProtocol
+from .protocols import InternetProtocol
 from .internet_checksum import Checksum
 from .ipv4 import IPv4Packet
 

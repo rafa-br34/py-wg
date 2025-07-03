@@ -35,12 +35,12 @@ class UnitBitwiseCodecs(unittest.TestCase):
 
 class UnitOptionsCodecs(unittest.TestCase):
 	def _check_state_change(self, options: list[TCPOption]):
-		encoded_a = tcp_opt_encode(options)
+		encoded_a, _size = tcp_opt_encode(options)
 		decoded_a = list(tcp_opt_decode(encoded_a))
 
 		self.assertNotIn(None, decoded_a, "Got None in the first re-encoding")
 
-		encoded_b = tcp_opt_encode(decoded_a) # type: ignore
+		encoded_b, _size = tcp_opt_encode(decoded_a) # type: ignore
 		decoded_b = list(tcp_opt_decode(encoded_b))
 
 		self.assertNotIn(None, decoded_b, "Got None in the second re-encoding")
@@ -50,6 +50,10 @@ class UnitOptionsCodecs(unittest.TestCase):
 		self.assertTrue(
 			compare_list(decoded_a, decoded_b),
 			"Decoded results differ between the first and second re-encoding",
+		)
+		self.assertTrue(
+			compare_list(options, decoded_a),
+			"Decoded results differ between the original and first re-encoding",
 		)
 		self.assertTrue(
 			compare_list(options, decoded_b),

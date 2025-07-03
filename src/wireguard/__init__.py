@@ -1,5 +1,5 @@
 from .wireguard import (
-	Peer,
+	Initiator,
 	PrivateKey,
 	PublicKey,
 )
@@ -8,7 +8,7 @@ from .handshake import Handshake
 from .keypair import KeyPair
 
 __all__ = [
-	"Peer",
+	"Initiator",
 	"PrivateKey",
 	"PublicKey",
 	"Handshake",

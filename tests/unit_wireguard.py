@@ -45,9 +45,11 @@ class UnitHandshake(unittest.TestCase):
 		dst_handshake = self.dst_handshake
 
 		for _ in range(64):
+			# (Initiator) Handshake request -> (Responder)
 			encoded_req = src_handshake.encode_handshake_req()
 			dst_handshake.decode_handshake_req(encoded_req)
 
+			# (Responder) Handshake response -> (Initiator)
 			encoded_res = dst_handshake.encode_handshake_res()
 			src_handshake.decode_handshake_res(encoded_res)
 
@@ -63,9 +65,11 @@ class UnitHandshake(unittest.TestCase):
 			src_handshake.preshared_key = preshared_key
 			dst_handshake.preshared_key = preshared_key
 
+			# (Initiator) Handshake request -> (Responder)
 			encoded_req = src_handshake.encode_handshake_req()
 			dst_handshake.decode_handshake_req(encoded_req)
 
+			# (Responder) Handshake response -> (Initiator)
 			encoded_res = dst_handshake.encode_handshake_res()
 			src_handshake.decode_handshake_res(encoded_res)
 
@@ -81,15 +85,19 @@ class UnitHandshake(unittest.TestCase):
 
 			dst_handshake.cookie_expected = False
 
+			# (Initiator) Handshake request -> (Responder)
 			encoded_req = src_handshake.encode_handshake_req()
 			dst_handshake.decode_handshake_req(encoded_req)
 
+			# (Responder) Cookie reply -> (Initiator)
 			encoded_cookie = dst_handshake.encode_cookie_reply(address)
 			src_handshake.decode_cookie_reply(encoded_cookie)
 
+			# (Initiator) Handshake request -> (Responder)
 			encoded_req = src_handshake.encode_handshake_req()
 			dst_handshake.decode_handshake_req(encoded_req)
 
+			# (Responder) Handshake response -> (Initiator)
 			encoded_res = dst_handshake.encode_handshake_res()
 			src_handshake.decode_handshake_res(encoded_res)
 
@@ -121,9 +129,11 @@ class UnitTimerLogic(unittest.TestCase):
 		for _ in range(16):
 			address = random.randbytes(random.choice([4 + 2, 16 + 2]))
 
+			# (Initiator) Handshake request -> (Responder)
 			encoded_req = src_handshake.encode_handshake_req()
 			dst_handshake.decode_handshake_req(encoded_req)
 
+			# (Responder) Cookie reply -> (Initiator)
 			encoded_cookie = dst_handshake.encode_cookie_reply(address)
 			src_handshake.decode_cookie_reply(encoded_cookie)
 
@@ -136,10 +146,21 @@ class UnitTimerLogic(unittest.TestCase):
 			)
 
 			try:
+				# (Initiator) Handshake request -> (Responder)
 				encoded_req = src_handshake.encode_handshake_req()
 				dst_handshake.decode_handshake_req(encoded_req)
 			except WireguardHandshakeException as error:
+				# @todo An exception is raised by unittest in this "catch" block thus adding noise to the output log.
 				self.fail(f"Responder was expected to accept the request, got \"{error}\" instead.")
+
+			# Finish handshake to check for proper key derivation
+
+			# (Responder) Handshake response -> (Initiator)
+			encoded_res = dst_handshake.encode_handshake_res()
+			src_handshake.decode_handshake_res(encoded_res)
+
+			check_handshake_equality(self, src_handshake, dst_handshake)
+			check_derivation(self, src_handshake, dst_handshake)
 
 	def tearDown(self):
 		time.monotonic = self._monotonic_function

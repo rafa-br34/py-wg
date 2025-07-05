@@ -14,7 +14,7 @@ To setup the wireguard parameters `.env-template` file with the appropriate valu
 Here's a brief overview of the required variables:
 
 - `WG_INITIATOR_KEY_PRI`: The private key of the initiator.
-- `WG_INITIATOR_PKT_ADDR`: The source address of the encrypted packets.
+- `WG_INITIATOR_PKT_ADDR`: The source address of the tunneled packets (interface address).
 - `WG_RESPONDER_KEY_PUB`: The public key of the responder.
 - `WG_RESPONDER_ADDR`: The IP address of the responder.
 - `WG_RESPONDER_PORT`: The port on which the responder is listening for incoming connections.
@@ -96,10 +96,10 @@ To get the servers simply open [api.mullvad.net/www/relays/all](https://api.mull
 ## List of examples and their purpose
 
 - `udp-round-trip.py`: Demonstrates how to connect a WireGuard peer and send UDP packets to DNS servers using `dnslib`.
+- `syn-scan.py`: Demonstrates how to perform a SYN scan over WireGuard.
 
 In the future more examples will be added to demonstrate different use cases of the library, such as:
 
-- Performing a SYN scan over WireGuard.
 - Performing a ICMP ping scan over WireGuard.
 - Creating a WireGuard server.
 - Establishing a 2-way TCP connection over WireGuard.

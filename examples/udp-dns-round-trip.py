@@ -16,6 +16,7 @@ from load_environ import (
 	server_addr,
 	server_key,
 )
+from utils import addr_to_int
 
 # pip install dnslib
 from dnslib import DNSRecord
@@ -41,11 +42,6 @@ query_next = True
 query_curr = 0
 query_port = 0
 query_ident = 0
-
-
-def addr_to_int(addr):
-	return int.from_bytes(socket.inet_aton(addr), byteorder = "big", signed = False)
-
 
 while True:
 	for packet in peer.update_state():

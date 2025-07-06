@@ -203,6 +203,8 @@ while True:
 
 		if key in scan_mapping_sent:
 			time_taken = "{:.3f}".format(scan_time_front - scan_mapping_sent[key])
+
+			del scan_mapping_sent[key]
 		else:
 			time_taken = "None (Possible retransmission?)"
 

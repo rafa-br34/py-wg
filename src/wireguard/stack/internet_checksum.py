@@ -18,6 +18,30 @@ def checksum_compute(data: bytes) -> int:
 
 	return ~checksum & 0xFFFF
 
+
+# @todo Check which is faster and use them
+def checksum_process(data: bytes, checksum: int = 0) -> int:
+	length = len(data)
+	index = 0
+
+	while length > 1:
+		checksum += (data[index] << 8) + data[index + 1]
+		length -= 2
+		index += 2
+
+	if length == 1:
+		checksum += data[index] << 8
+
+	return checksum & 0xFFFFFFFF
+
+
+def checksum_finalize(checksum: int = 0) -> int:
+	while checksum >> 16:
+		checksum = (checksum & 0xFFFF) + (checksum >> 16)
+
+	return ~checksum & 0xFFFF
+
+
 class Checksum:
 	def __init__(self):
 		self.reset()
@@ -30,7 +54,7 @@ class Checksum:
 		length = len(data)
 		index = 0
 
-		if self._remainder != None:
+		if self._remainder is not None:
 			self._checksum += self._remainder + data[index]
 			index += 1
 			length -= 1
@@ -46,7 +70,7 @@ class Checksum:
 			self._remainder = None
 
 	def finalize(self) -> int:
-		if self._remainder != None:
+		if self._remainder is not None:
 			self._checksum += self._remainder
 
 		checksum = self._checksum & 0xFFFFFFFF
@@ -55,4 +79,3 @@ class Checksum:
 			checksum = (checksum & 0xFFFF) + (checksum >> 16)
 
 		return ~checksum & 0xFFFF
-	

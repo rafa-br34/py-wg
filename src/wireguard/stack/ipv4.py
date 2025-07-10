@@ -144,17 +144,17 @@ class IPv4Packet:
 		self.ttl = ttl
 
 	def __repr__(self) -> str:
-		dscp = ipv4_dscp_to_str(self.dscp)
-		ecn = IPv4Congestion(self.ecn).name
-		ident = self.ident
-		flags = ipv4_flags_to_str(self.flags)
-		offset = self.frag_offset
-		ttl = self.ttl
-		protocol = internet_protocol_to_str(self.protocol)
-		checksum = f"0x{self.checksum:04X}"
-		checksum_valid = self.checksum_valid is None and "Unknown" or self.checksum_valid
-
-		return f"IPv4Packet(dscp = {dscp}, ecn = {ecn}, ident = {ident}, flags = {flags}, frag_offset = {offset}, ttl = {ttl}, protocol = {protocol}, checksum = {checksum}, checksum_valid = {checksum_valid})"
+		return "IPv4Packet(dscp = {}, ecn = {}, ident = {}, flags = {}, frag_offset = {}, ttl = {}, protocol = {}, checksum = 0x{:04X}, checksum_valid = {})".format(
+			ipv4_dscp_to_str(self.dscp),
+			IPv4Congestion(self.ecn).name,
+			self.ident,
+			ipv4_flags_to_str(self.flags),
+			self.frag_offset,
+			self.ttl,
+			internet_protocol_to_str(self.protocol),
+			self.checksum,
+			self.checksum_valid is None and "Unknown" or self.checksum_valid,
+		)
 
 	def _encode_payload(self) -> tuple[bytes, int]:
 		protocol = self.protocol

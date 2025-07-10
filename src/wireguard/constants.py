@@ -5,14 +5,14 @@ from enum import IntEnum
 from .functions import wg_hash
 
 
+# yapf: disable
 class MessageTypes(IntEnum):
 	MSG_HANDSHAKE_REQ = 0x01
 	MSG_HANDSHAKE_RES = 0x02
-	MSG_COOKIE_REPLY = 0x03
-	MSG_TRANSPORT = 0x04
+	MSG_COOKIE_REPLY  = 0x03
+	MSG_TRANSPORT     = 0x04
 
 
-# yapf: disable
 TEMPLATE_CONSTRUCTION = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s"
 TEMPLATE_IDENTIFIER   = b"WireGuard v1 zx2c4 Jason@zx2c4.com"
 TEMPLATE_LABEL_MAC    = b"mac1----"

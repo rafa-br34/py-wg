@@ -39,6 +39,7 @@ The following references were used while building this project:
 - [WireGuard paper](https://www.wireguard.com/papers/wireguard.pdf)
 - [WireGuard website](https://www.wireguard.com)
 - [wireguard-lwip](https://github.com/smartalock/wireguard-lwip) by [smartalock](https://github.com/smartalock)
+- [RFC 792](https://datatracker.ietf.org/doc/html/rfc792) (ICMP standard)
 - [RFC 791](https://datatracker.ietf.org/doc/html/rfc791) (IPv4 standard)
 - [RFC 8200](https://datatracker.ietf.org/doc/html/rfc8200) (IPv6 standard)
 - [IANA DSCP & ECN](https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml) (IPv4/IPv6 DSCP and ECN)

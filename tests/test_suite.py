@@ -9,6 +9,7 @@ TEST_UNITS = [
 	"unit_ipv4",
 	"unit_tcp",
 	"unit_udp",
+	"unit_icmp",
 	"unit_wireguard",
 ]
 

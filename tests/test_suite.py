@@ -54,3 +54,14 @@ def run_tests():
 
 if __name__ == "__main__":
 	run_tests()
+else:
+	global_scope = globals()
+
+	for test_unit in TEST_UNITS:
+		module = importlib.import_module(test_unit, __package__)
+		for test_case in module.UNIT_CLASSES:
+			global_scope[f"{test_unit}_{test_case.__name__}"] = test_case
+
+	# Clear test_* variables
+	test_unit = None
+	test_case = None

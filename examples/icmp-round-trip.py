@@ -20,7 +20,7 @@ from utils import addr_to_int
 
 ICMP_MESSAGE_LEN = 32
 ICMP_TIMEOUT = 5
-ICMP_SERVER = "8.8.8.8" #"1.1.1.1"
+ICMP_SERVER = "8.8.8.8"
 
 peer = Initiator(PrivateKey(base64.b64decode(client_key)), PublicKey(base64.b64decode(server_key)))
 

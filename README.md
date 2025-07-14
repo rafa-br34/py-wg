@@ -12,6 +12,7 @@ A pure python implementation of the WireGuard protocol.
   - [Table of contents](#table-of-contents)
   - [Motivation](#motivation)
   - [Performance](#performance)
+  - [Installation](#installation)
   - [Usage](#usage)
   - [Testing and troubleshooting](#testing-and-troubleshooting)
   - [References](#references)
@@ -24,6 +25,20 @@ And finally, because why not? It's a fun project to learn about the WireGuard pr
 ## Performance
 
 One major drawback of this implementation is its speed. While rewriting it in a faster language like C++ with Python bindings could solve this, it would also add significant complexity. For now, the focus is on optimizing the existing Python code as much as possible.
+
+## Installation
+
+You can install py-wg from PyPI using
+
+```bash
+pip install wireguard-protocol
+```
+
+Alternatively, you can install directly from the repository using
+
+```bash
+pip install git+https://github.com/rafa-br34/py-wg.git
+```
 
 ## Usage
 

@@ -19,7 +19,6 @@ jobs:
 
       - run: |
           python3 -m pip install --upgrade pip
-          ls .
           pip install -r requirements.txt || true
 
       - name: Run test suite

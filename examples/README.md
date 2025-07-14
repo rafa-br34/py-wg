@@ -95,12 +95,12 @@ To get the servers simply open [api.mullvad.net/www/relays/all](https://api.mull
 
 ## List of examples and their purpose
 
+- `icmp-round-trip.py`: Demonstrates how to perform an ICMP ping over WireGuard.
 - `udp-round-trip.py`: Demonstrates how to connect a WireGuard peer and send UDP packets to DNS servers using `dnslib`.
 - `syn-scan.py`: Demonstrates how to perform a SYN scan over WireGuard.
 
 In the future more examples will be added to demonstrate different use cases of the library, such as:
 
-- Performing a ICMP ping scan over WireGuard.
 - Creating a WireGuard server.
 - Establishing a 2-way TCP connection over WireGuard.
 - Performing a full HTTP(S) request over WireGuard + `requests`.

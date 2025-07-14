@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from enum import IntEnum
 
 from .internet_checksum import Checksum
+from .protocols import InternetProtocol
 from .ipv4 import IPv4Packet
 
 # yapf: disable
@@ -144,6 +145,10 @@ class ICMPPacket:
 			self.checksum,
 			self.checksum_valid is None and "Unknown" or self.checksum_valid,
 		)
+
+	@property
+	def protocol_number(self):
+		return InternetProtocol.IP_ICMPV4
 
 	def get_type_meaning(self):
 		msg_type = self.msg_type

@@ -1,5 +1,9 @@
 # Python WireGuard
 
+![Tests](https://github.com/rafa-br34/py-wg/actions/workflows/tests.yml/badge.svg?branch=main)
+![PyPI](https://img.shields.io/pypi/v/wireguard-protocol?color=blue&label=PyPI)
+![Downloads](https://img.shields.io/pypi/dm/wireguard-protocol)
+
 A pure python implementation of the WireGuard protocol.
 
 ## Table of contents

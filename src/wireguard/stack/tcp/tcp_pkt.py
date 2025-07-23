@@ -104,10 +104,20 @@ class TCPPacket:
 	def protocol_number(self):
 		return InternetProtocol.IP_TCP
 
-	def get_option(self, kind: TCPOptionKind):
+	def opt_get(self, kind: TCPOptionKind):
 		for opt in self.options:
 			if opt.kind == kind:
 				return opt
+
+	def opt_set(self, kind: TCPOptionKind, **kwargs):
+		opt = self.opt_get(kind)
+
+		if not opt:
+			opt = TCPOption(kind)
+			self.options.append(opt)
+
+		for key, val in kwargs:
+			opt.__dict__[key] = val
 
 	def encode_packet_ipv4(self, ipv4: IPv4Packet):
 		payload = self.payload or b""

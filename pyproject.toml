@@ -12,8 +12,24 @@ description = "A pure Python implementation of WireGuard"
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
-	"Programming Language :: Python :: 3",
 	"Operating System :: OS Independent",
+	"License :: OSI Approved :: MIT License",
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
+	"Intended Audience :: Science/Research",
+	"Intended Audience :: Telecommunications Industry",
+	"Intended Audience :: System Administrators",
+	"Intended Audience :: Developers",
+	"Development Status :: 3 - Alpha",
+	"Natural Language :: English",
+	"Topic :: Communications",
+	"Topic :: Internet",
+	"Topic :: Security",
+	"Topic :: Security :: Cryptography",
+	"Topic :: Utilities",
 ]
 license = "MIT"
 license-files = ["LICENSE"]

@@ -20,20 +20,19 @@ TCP_MSL = 30
 
 
 # RFC 9293 @ 3.4.1
-def initial_sequence_number(src_ip, src_port, dst_ip, dst_port):
+# Here we remove the src_addr and dst_addr for simplicity sake
+def initial_sequence_number(src_port, dst_port):
 	packed = struct.pack(
-		"@IIHHQQ",
-		src_ip,
-		dst_ip,
+		"@HQHQ",
 		src_port,
-		dst_port,
 		TCP_ISN_SALT_0,
+		dst_port,
 		TCP_ISN_SALT_1,
 	)
 	hashed = hashlib.blake2s(packed).digest()
 	counter = int(time.monotonic() * 250000) & 0xFFFFFFFF
 
-	return counter + int.from_bytes(hashed[:4])
+	return (counter + int.from_bytes(hashed[:4])) & 0xFFFFFFFF
 
 
 # RFC 9293 @ 3.3.2
@@ -77,22 +76,18 @@ class TCPConnection:
 		self.state = initial_state
 
 		# RFC 9293 @ 3.3.1
-		self.send_una = 0 # Unacknowledged
-		self.send_nxt = 0 # Next
-		self.send_wnd = 0 # Window
-		self.send_urg = 0 # Urgent pointer
-		self.send_isn = 0 # Initial sequence number
+		self.send_una = 0 # SND.UNA
+		self.send_nxt = 0 # SND.NXT
+		self.send_wnd = 0 # SND.WND
+		self.send_urg = 0 # SND.UP
+		self.send_isn = 0 # ISS (Initial send sequence number)
+		self.send_wnd_seq = 0 # SND.WL1
+		self.send_wnd_ack = 0 # SND.WL2
 
-		self.recv_nxt = 0
-		self.recv_wnd = 0
-		self.recv_urg = 0
-		self.recv_isn = 0
-
-		self.seg_seq = 0
-		self.seg_ack = 0
-		self.seg_len = 0
-		self.seg_wnd = 0
-		self.seg_urg = 0
+		self.recv_nxt = 0 # RCV.NXT
+		self.recv_wnd = 0 # RCV.WND
+		self.recv_urg = 0 # RCV.UP
+		self.recv_isn = 0 # IRS (Initial receive sequence number)
 
 		self.dst_retransmit = collections.deque()
 		self.dst_staged = collections.deque()
@@ -122,7 +117,43 @@ class TCPConnection:
 			return
 
 		if fg_ack:
-			self._enqueue_outbound(TCPPacket(seq_num = 0))
+			self._enqueue_outbound(TCPPacket(flags = TCPFlags.FG_RST, seq_num = packet.ack_num))
+		else:
+			self._enqueue_outbound(TCPPacket(flags = TCPFlags.FG_RST | TCPFlags.FG_ACK, seq_num = 0))
+
+	# RFC 9293 @ 3.10.7.2
+	def _state_listen(self, packet: TCPPacket):
+		fg_syn = packet.flags & TCPFlags.FG_SYN
+		fg_rst = packet.flags & TCPFlags.FG_RST
+		fg_ack = packet.flags & TCPFlags.FG_ACK
+
+		if fg_rst:
+			return
+
+		if fg_ack:
+			self._enqueue_outbound(TCPPacket(flags = TCPFlags.FG_RST, seq_num = packet.ack_num))
+			return
+
+		if not fg_syn:
+			return
+
+		self.recv_nxt = packet.seq_num + 1
+		self.recv_isn = packet.seq_num
+
+		isn = initial_sequence_number(self.src_port, self.dst_port)
+
+		self.send_isn = isn
+		self.send_nxt = isn + 1
+		self.send_una = isn
+
+		self._enqueue_outbound(
+			TCPPacket(
+				flags = TCPFlags.FG_ACK | TCPFlags.FG_SYN,
+				seq_num = isn,
+				ack_num = packet.seq_num,
+			)
+		)
+		self._advance_state(TCPState.STATE_SYN_RECEIVED)
 
 	# RFC 9293 @ 3.10.7.3
 	def _state_syn_sent(self, packet: TCPPacket):
@@ -137,8 +168,8 @@ class TCPConnection:
 
 				return
 
-			if (self.send_una < packet.ack_num and packet.ack_num <= self.send_nxt):
-				return
+			if not (self.send_una < packet.ack_num and packet.ack_num <= self.send_nxt):
+				return False
 		else:
 			# @todo For this to be fully RFC compliant simultaneous open should be supported
 			return
@@ -151,28 +182,46 @@ class TCPConnection:
 			self.recv_nxt = packet.seq_num + 1
 			self.recv_isn = packet.seq_num
 
-		if packet.ack_num > self.send_una:
+		if fg_ack and packet.ack_num > self.send_una:
 			self.send_una = packet.ack_num
 
 		if self.send_una > self.send_isn:
-			self._enqueue_outbound(TCPPacket(flags = TCPFlags.FG_ACK, seq_num = self.send_nxt, ack_num = self.recv_nxt))
+			self._enqueue_outbound(
+				TCPPacket(
+					flags = TCPFlags.FG_ACK,
+					seq_num = self.send_nxt,
+					ack_num = self.recv_nxt,
+				)
+			)
 			self._advance_state(TCPState.STATE_ESTABLISHED)
+		else:
+			self._enqueue_outbound(
+				TCPPacket(
+					flags = TCPFlags.FG_ACK | TCPFlags.FG_SYN,
+					seq_num = self.send_isn,
+					ack_num = self.recv_nxt,
+				)
+			)
+			self._advance_state(TCPState.STATE_SYN_RECEIVED)
+
+			self.send_wnd = packet.window
+			self.send_wnd_seq = packet.seq_num
+			self.send_wnd_ack = packet.ack_num
 
 	# RFC 9293 @ 3.10.7
 	def _recv_packet(self, packet: TCPPacket):
-		#FG_ECE
-		#FG_CWR
-		#FG_AE
 		match self.state:
 			case TCPState.STATE_CLOSED:
 				self._state_closed(packet)
+				return
 
 			case TCPState.STATE_LISTEN:
-				# @todo Implement this case
-				pass
+				self._state_listen(packet)
+				return
 
 			case TCPState.STATE_SYN_SENT:
 				self._state_syn_sent(packet)
+				return
 
 	# RFC 9293 @ 3.10.1
 	def event_open(self, src_addr: int, src_port: int, dst_addr: Optional[int] = None, dst_port: Optional[int] = None):
@@ -210,7 +259,7 @@ class TCPConnection:
 		elif src_type == 6:
 			conn_mss = TCP_MAX_MSS_V6
 
-		isn = initial_sequence_number(src_addr, src_port, dst_addr, dst_port)
+		isn = initial_sequence_number(src_port, dst_port)
 
 		self.send_isn = isn
 		self.send_una = isn
@@ -219,10 +268,8 @@ class TCPConnection:
 		self.src_mss = conn_mss
 		self.dst_mss = conn_mss
 
-		mss_option = TCPOption(TCPOptionKind.OPT_MSS, mss = conn_mss)
-
 		packet = TCPPacket(flags = TCPFlags.FG_SYN)
-		packet.options.append(mss_option)
+		packet.opt_set(TCPOptionKind.OPT_MSS, mss = conn_mss)
 
 		self._enqueue_outbound(packet)
 		self._advance_state(TCPState.STATE_SYN_SENT)

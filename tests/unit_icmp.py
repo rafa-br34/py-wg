@@ -29,6 +29,10 @@ class UnitPacketCodec(unittest.TestCase):
 			ICMPType.MSG_PARAM_PROBLEM,
 			ICMPType.MSG_REDIRECT,
 		)
+		requires_time = (
+			ICMPType.MSG_TIMESTAMP_REQ,
+			ICMPType.MSG_TIMESTAMP_RES,
+		)
 
 		for _ in range(1024):
 			msg_type = random.choice(list(ICMPType))
@@ -43,7 +47,7 @@ class UnitPacketCodec(unittest.TestCase):
 			if msg_type in requires_payload:
 				values.payload = random.randbytes(random.randint(28, 1024))
 
-			if msg_type in (ICMPType.MSG_TIMESTAMP_REQ, ICMPType.MSG_TIMESTAMP_RES):
+			if msg_type in requires_time:
 				values.time_origin = random.randint(0x00000000, 0xFFFFFFFF)
 				values.time_rx = random.randint(0x00000000, 0xFFFFFFFF)
 				values.time_tx = random.randint(0x00000000, 0xFFFFFFFF)
@@ -67,6 +71,11 @@ class UnitPacketCodec(unittest.TestCase):
 			self.assertEqual(recv_pkt.msg_code, msg_code, "Message code varies")
 
 			self.assertEqual(send_pkt.values, recv_pkt.values, "Values differ")
+
+			# Just so the representation of the values doesn't change
+			send_pkt.values = recv_pkt.values
+
+			self.assertEqual(send_pkt.__repr__(), recv_pkt.__repr__(), "Representation differs")
 
 
 UNIT_CLASSES = [UnitPacketCodec]

@@ -28,7 +28,12 @@ class UDPPacket:
 		self.payload = payload
 
 	def __repr__(self) -> str:
-		return f"UDPPacket(src_port = {self.src_port}, dst_port = {self.dst_port}, checksum = 0x{self.checksum:04X}, checksum_valid = {self.checksum_valid})"
+		return "UDPPacket(src_port = {}, dst_port = {}, checksum = 0x{:04X}, checksum_valid = {})".format(
+			self.src_port,
+			self.dst_port,
+			self.checksum,
+			self.checksum_valid,
+		)
 
 	@property
 	def protocol_number(self):

@@ -88,17 +88,15 @@ class TCPPacket:
 		self.options = options or []
 
 	def __repr__(self):
-		src_port = self.src_port
-		dst_port = self.dst_port
-		seq_num = f"0x{self.seq_num:08X}"
-		ack_num = f"0x{self.ack_num:08X}"
-
-		window = self.window
-		urg_ptr = self.urg_ptr
-
-		flags = tcp_flags_to_str(self.flags)
-
-		return f"TCPPacket(src = {src_port}, dst = {dst_port}, flags = {flags}, seq = {seq_num}, ack = {ack_num}, wnd = {window}, urg = {urg_ptr})"
+		return "TCPPacket(src = {}, dst = {}, flags = {}, seq = 0x{:08X}, ack = 0x{:08X}, wnd = {}, urg = {})".format(
+			self.src_port,
+			self.dst_port,
+			tcp_flags_to_str(self.flags),
+			self.seq_num,
+			self.ack_num,
+			self.window,
+			self.urg_ptr,
+		)
 
 	@property
 	def protocol_number(self):

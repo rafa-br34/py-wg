@@ -1,3 +1,16 @@
+"""
+> PYTHONPATH=../ py syn-scan.py
+[OPEN] 45.33.32.156:53 0.469
+[OPEN] 45.33.32.156:22 0.656
+[OPEN] 45.33.32.156:80 0.656
+[OPEN] 45.33.32.156:9929 0.641
+[OPEN] 45.33.32.156:31337 0.641
+[OPEN] 45.33.32.156:9929 No prior SYN (Possible retransmission?)
+Finished scanning, waiting 20 seconds
+[OPEN] 45.33.32.156:31337 No prior SYN (Possible retransmission?)
+Done waiting
+"""
+
 import random
 import socket
 import base64
@@ -6,13 +19,12 @@ import copy
 
 from src.wireguard.wireguard import Initiator, PrivateKey, PublicKey
 from src.wireguard.functions import wg_pad
-from src.wireguard.stack.ip import ip_packet_val
-from src.wireguard.stack.protocols import InternetProtocol, internet_protocol_to_str
+from src.wireguard.stack.internet import Protocols, internet_protocol_to_str, ip_packet_val
 from src.wireguard.stack.ipv4 import IPv4Packet
 from src.wireguard.stack.tcp import TCPPacket, TCPFlags
 
 from load_environ import (
-	client_addr,
+	client_addr_v4,
 	client_key,
 	server_addr,
 	server_key,
@@ -77,10 +89,10 @@ tcp_send = TCPPacket()
 
 tcp_send.flags = TCPFlags.FG_SYN
 
-ipv4_send.src_addr = addr_to_int(client_addr)
+ipv4_send.src_addr = addr_to_int(client_addr_v4)
 ipv4_send.payload = tcp_send
 
-scan_src_addr = addr_to_int(client_addr)
+scan_src_addr = addr_to_int(client_addr_v4)
 scan_mapping_sent = {}
 scan_mapping_recv = {}
 scan_delay = 1 / SCAN_RATE
@@ -181,7 +193,7 @@ while True:
 
 		ipv4_recv.decode_packet(decoded)
 
-		if ipv4_recv.protocol != InternetProtocol.IP_TCP:
+		if ipv4_recv.protocol != Protocols.IP_TCP:
 			print(f"Received packet of type {internet_protocol_to_str(ipv4_recv.protocol)}")
 			continue
 
@@ -206,7 +218,7 @@ while True:
 
 			del scan_mapping_sent[key]
 		else:
-			time_taken = "None (Possible retransmission?)"
+			time_taken = "No prior SYN (Possible retransmission?)"
 
 		state = "UNKNOWN"
 

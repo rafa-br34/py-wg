@@ -1,3 +1,21 @@
+"""
+> PYTHONPATH=../ py scapy-icmp6.py
+Ping 1
+Round trip time: 0.468
+ICMPv6 Echo Reply (id: 0xdbee seq: 0x1)
+Ping 2
+Round trip time: 0.453
+ICMPv6 Echo Reply (id: 0xa319 seq: 0x2)
+Ping 3
+Round trip time: 0.453
+ICMPv6 Echo Reply (id: 0x43be seq: 0x3)
+Ping 4
+Round trip time: 0.468
+ICMPv6 Echo Reply (id: 0xc969 seq: 0x4)
+Ping 5
+...
+"""
+
 import random
 import socket
 import base64
@@ -9,8 +27,11 @@ from src.wireguard.stack.internet import Protocols, internet_protocol_to_str, ip
 from src.wireguard.stack.ipv4 import IPv4Packet
 from src.wireguard.stack.icmp import ICMPPacket, ICMPType
 
+# pip install scapy
+from scapy.layers.inet6 import IPv6, ICMPv6EchoRequest, ICMPv6EchoReply
+
 from load_environ import (
-	client_addr_v4,
+	client_addr_v6,
 	client_key,
 	server_addr,
 	server_key,
@@ -19,18 +40,12 @@ from utils import addr_to_int
 
 ICMP_MESSAGE_LEN = 32
 ICMP_TIMEOUT = 5
-ICMP_SERVER = "8.8.8.8"
+ICMP_SERVER = "2606:4700:4700::1111"
 
 peer = Initiator(PrivateKey(base64.b64decode(client_key)), PublicKey(base64.b64decode(server_key)))
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setblocking(False)
-
-ipv4_recv = IPv4Packet()
-icmp_recv = ICMPPacket()
-
-ipv4_send = IPv4Packet()
-icmp_send = ICMPPacket()
 
 ping_sent = time.monotonic()
 ping_next = True
@@ -55,17 +70,18 @@ while True:
 		ping_ident = random.randint(0x0000, 0xFFFF)
 		ping_curr += 1
 
-		ipv4_send.src_addr = addr_to_int(client_addr_v4)
-		ipv4_send.dst_addr = addr_to_int(ICMP_SERVER)
-		ipv4_send.payload = icmp_send
+		pkt_v6 = IPv6(
+			src = client_addr_v6,
+			dst = ICMP_SERVER,
+		)
+		pkt_icmp6 = ICMPv6EchoRequest(
+			id = ping_ident,
+			seq = ping_curr,
+			data = random.randbytes(ICMP_MESSAGE_LEN),
+		)
 
-		icmp_send.msg_type = ICMPType.MSG_ECHO_REQ
-		icmp_send.msg_code = 0
-		icmp_send.values.identifier = ping_ident
-		icmp_send.values.sequence = ping_curr
-		icmp_send.values.payload = random.randbytes(ICMP_MESSAGE_LEN)
-
-		peer.encode_transport(wg_pad(ipv4_send.encode_packet()))
+		pkt = pkt_v6 / pkt_icmp6
+		peer.encode_transport(wg_pad(pkt.build()))
 
 		ping_sent = time.monotonic()
 		ping_next = False
@@ -78,27 +94,30 @@ while True:
 	if decoded:
 		ver = ip_packet_val(decoded)
 
-		if ver != 4:
+		if ver != 6:
 			print(f"Got packet with version {ver}")
 			continue
 
-		ipv4_recv.decode_packet(decoded)
-
-		if ipv4_recv.protocol != Protocols.IP_ICMPV4:
-			print(f"Received packet of type {internet_protocol_to_str(ipv4_recv.protocol)}")
+		try:
+			pkt_v6 = IPv6(decoded)
+		except Exception as error:
+			print(f"Failed to decode IPv6 header with exception {error}")
 			continue
 
-		if not ipv4_recv.payload:
+		if pkt_v6.nh != 58 or not pkt_v6.haslayer(ICMPv6EchoReply):
+			print(f"Received packet of type {pkt_v6.nh}")
+			continue
+
+		if bytes(pkt_v6.payload) == b"":
 			print("Invalid IP payload")
 			continue
 
-		icmp_recv.decode_packet_ipv4(ipv4_recv.payload, ipv4_recv, True)
-
-		if icmp_recv.values.identifier != ping_ident:
-			print(f"Received ping response packet to unknown identifier ({icmp_recv.values.identifier})")
+		pkt_icmp6 = pkt_v6[ICMPv6EchoReply]
+		if pkt_icmp6.id != ping_ident:
+			print(f"Received ping response packet to unknown identifier ({getattr(pkt_icmp6, 'id', None)})")
 			continue
 
-		print("Ping {}\nRound trip time: {:.3f}\n{}".format(ping_curr, time.monotonic() - ping_sent, icmp_recv))
+		print("Ping {}\nRound trip time: {:.3f}\n{}".format(ping_curr, time.monotonic() - ping_sent, pkt_icmp6))
 
 		ping_next = True
 

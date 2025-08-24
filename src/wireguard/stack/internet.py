@@ -4,7 +4,7 @@ from enum import IntEnum
 
 # https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml#protocol-numbers-1
 # yapf: disable
-class InternetProtocol(IntEnum):
+class Protocols(IntEnum):
 	IP_HOPOPT             = 0x00 # IPv6 Hop-by-Hop Option
 	IP_ICMPV4             = 0x01 # Internet Control Message Protocol
 	IP_IGMP               = 0x02 # Internet Group Management Protocol
@@ -159,14 +159,18 @@ class InternetProtocol(IntEnum):
 # yapf: enable
 
 
-def internet_protocol_to_str(protocol: Optional[InternetProtocol | int]):
+def internet_protocol_to_str(protocol: Optional[Protocols | int]):
 	if protocol is None:
 		return "None"
-	elif isinstance(protocol, InternetProtocol):
+	elif isinstance(protocol, Protocols):
 		return protocol.name
 
 	# @note We don't use x in Enum because of back compatibility with python 3.10.x
 	try:
-		return InternetProtocol(protocol).name
+		return Protocols(protocol).name
 	except ValueError:
 		return "Unknown"
+
+
+def ip_packet_val(packet: bytes):
+	return (packet[0] & 0xF0) >> 4

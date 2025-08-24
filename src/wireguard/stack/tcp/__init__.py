@@ -19,6 +19,11 @@ from .tcp_opt import (
 	TCPOptWindow,
 	TCPOptSACK,
 )
+from .tcp_fsm import (
+	initial_sequence_number,
+	TCPState,
+	TCPConnection,
+)
 
 __all__ = [
 	"tcp_encode_offset_control",
@@ -38,4 +43,7 @@ __all__ = [
 	"TCPOptMSS",
 	"TCPOptWindow",
 	"TCPOptSACK",
+	"initial_sequence_number",
+	"TCPState",
+	"TCPConnection",
 ]

@@ -14,10 +14,9 @@ To setup the wireguard parameters `.env-template` file with the appropriate valu
 Here's a brief overview of the required variables:
 
 - `WG_INITIATOR_KEY_PRI`: The private key of the initiator.
-- `WG_INITIATOR_PKT_ADDR`: The source address of the tunneled packets (interface address).
+- `WG_INITIATOR_PKT_ADDR_V4` & `WG_INITIATOR_PKT_ADDR_V6`: The source address of the tunneled packets (interface address).
 - `WG_RESPONDER_KEY_PUB`: The public key of the responder.
-- `WG_RESPONDER_ADDR`: The IP address of the responder.
-- `WG_RESPONDER_PORT`: The port on which the responder is listening for incoming connections.
+- `WG_RESPONDER_ADDR` & `WG_RESPONDER_PORT`: The address and port of the responder.
 
 The examples are meant to be ran in this directory without the module installed, so you can run them by using `PYTHONPATH=../ py <example_name>.py` in this directory.
 If you desire to run the examples with the module installed, you will first need remove the `src` part from the imports.
@@ -42,7 +41,7 @@ Endpoint = 123.45.67.89:51820
 Where:
 
 - `PrivateKey` is the `WG_INITIATOR_KEY_PRI`.
-- `Address` is the `WG_INITIATOR_PKT_ADDR` for IPv4 and IPv6 respectively.
+- `Address` is the `WG_INITIATOR_PKT_ADDR_V4` and `WG_INITIATOR_PKT_ADDR_V6` respectively.
 - `PublicKey` is the `WG_RESPONDER_KEY_PUB`.
 - `Endpoint` is the `WG_RESPONDER_ADDR` and `WG_RESPONDER_PORT`.
 
@@ -95,9 +94,12 @@ To get the servers simply open [api.mullvad.net/www/relays/all](https://api.mull
 
 ## List of examples and their purpose
 
+Every example has a comment at the top of what it should output when successfully ran.
+
 - `icmp-round-trip.py`: Demonstrates how to perform an ICMP ping over WireGuard.
 - `udp-round-trip.py`: Demonstrates how to connect a WireGuard peer and send UDP packets to DNS servers using `dnslib`.
 - `syn-scan.py`: Demonstrates how to perform a SYN scan over WireGuard.
+- `scapy-icmp6.py`: Demonstrates how to send ICMPv6 packets over WireGuard using `scapy` for encoding.
 
 In the future more examples will be added to demonstrate different use cases of the library, such as:
 

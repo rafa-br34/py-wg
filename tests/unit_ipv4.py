@@ -1,4 +1,4 @@
-from src.wireguard.stack.protocols import InternetProtocol
+from src.wireguard.stack.internet import Protocols
 from src.wireguard.stack.ipv4 import (
 	ipv4_encode_ver_ihl,
 	ipv4_decode_ver_ihl,
@@ -56,7 +56,7 @@ class UnitPacketCodec(unittest.TestCase):
 		for _ in range(1024):
 			src_addr = random.randint(0x00000000, 0xFFFFFFFF)
 			dst_addr = random.randint(0x00000000, 0xFFFFFFFF)
-			protocol = random.choice(list(InternetProtocol))
+			protocol = random.choice(list(Protocols))
 			payload = random.randbytes(random.randint(0, 1024))
 			ident = random.randint(0x0000, 0xFFFF)
 			dscp = random.choice(list(IPv4ServiceType))

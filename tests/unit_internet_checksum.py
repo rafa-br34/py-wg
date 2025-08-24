@@ -1,4 +1,4 @@
-from src.wireguard.stack.internet_checksum import Checksum, checksum_compute
+from src.wireguard.stack.checksum import Checksum, checksum_compute
 
 import unittest
 import random

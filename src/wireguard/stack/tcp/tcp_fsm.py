@@ -7,7 +7,6 @@ import time
 from typing import Optional
 from enum import IntEnum
 
-from ..ip import ip_addr_val
 from ..ipv4 import IPv4Packet
 from .tcp_pkt import TCPPacket, TCPFlags, TCP_MAX_MSS_V4, TCP_MAX_MSS_V6
 from .tcp_opt import TCPOption, TCPOptionKind
@@ -16,7 +15,7 @@ from .tcp_opt import TCPOption, TCPOptionKind
 TCP_ISN_SALT_0 = random.randrange(0x0000000000000000, 0xFFFFFFFFFFFFFFFF)
 TCP_ISN_SALT_1 = random.randrange(0x0000000000000000, 0xFFFFFFFFFFFFFFFF)
 
-TCP_MSL = 30
+TCP_MSL = 60
 
 
 # RFC 9293 @ 3.4.1
@@ -90,7 +89,8 @@ class TCPConnection:
 		self.recv_isn = 0 # IRS (Initial receive sequence number)
 
 		self.dst_retransmit = collections.deque()
-		self.dst_staged = collections.deque()
+		self.dst_staged_buffer = collections.deque()
+		self.dst_staged_index = 0
 		self.dst_addr = 0
 		self.dst_port = 0
 		self.dst_mss = 0
@@ -106,6 +106,7 @@ class TCPConnection:
 		self.dst_retransmit.append(packet)
 
 	def _advance_state(self, state: TCPState):
+		print(f"next state: {state.name}")
 		self.state = state
 
 	# RFC 9293 @ 3.10.7.1
@@ -150,7 +151,7 @@ class TCPConnection:
 			TCPPacket(
 				flags = TCPFlags.FG_ACK | TCPFlags.FG_SYN,
 				seq_num = isn,
-				ack_num = packet.seq_num,
+				ack_num = self.recv_nxt,
 			)
 		)
 		self._advance_state(TCPState.STATE_SYN_RECEIVED)
@@ -163,8 +164,9 @@ class TCPConnection:
 
 		if fg_ack:
 			if packet.ack_num <= self.send_isn or packet.ack_num > self.send_nxt:
-				if not fg_rst:
-					self._enqueue_outbound(TCPPacket(flags = TCPFlags.FG_RST, seq_num = packet.ack_num))
+				if fg_rst:
+					return
+				self._enqueue_outbound(TCPPacket(flags = TCPFlags.FG_RST, seq_num = packet.ack_num))
 
 				return
 
@@ -231,7 +233,7 @@ class TCPConnection:
 		if not isinstance(src_addr, int):
 			raise ValueError("Invalid type for src_addr")
 
-		src_type = ip_addr_val(src_addr)
+		src_type = 4 #ip_addr_val(src_addr)
 		self.src_addr = src_addr
 		self.src_port = src_port
 
@@ -239,15 +241,15 @@ class TCPConnection:
 			self._advance_state(TCPState.STATE_LISTEN)
 			return
 
-		if dst_addr is not None:
-			raise ValueError("Got dst_addr but not dst_port")
-		if dst_port is not None:
+		if dst_addr is None:
 			raise ValueError("Got dst_port but not dst_addr")
+		if dst_port is None:
+			raise ValueError("Got dst_addr but not dst_port")
 
 		if not isinstance(dst_addr, int):
 			raise ValueError("Invalid type for dst_addr")
 
-		dst_type = ip_addr_val(dst_addr)
+		dst_type = 4 #ip_addr_val(dst_addr)
 		self.dst_addr = dst_addr
 		self.dst_port = dst_port
 
@@ -258,6 +260,8 @@ class TCPConnection:
 			conn_mss = TCP_MAX_MSS_V4
 		elif src_type == 6:
 			conn_mss = TCP_MAX_MSS_V6
+		else:
+			raise ValueError("Unknown src_type")
 
 		isn = initial_sequence_number(src_port, dst_port)
 
@@ -268,7 +272,7 @@ class TCPConnection:
 		self.src_mss = conn_mss
 		self.dst_mss = conn_mss
 
-		packet = TCPPacket(flags = TCPFlags.FG_SYN)
+		packet = TCPPacket(flags = TCPFlags.FG_SYN, seq_num = isn)
 		packet.opt_set(TCPOptionKind.OPT_MSS, mss = conn_mss)
 
 		self._enqueue_outbound(packet)
@@ -285,11 +289,12 @@ class TCPConnection:
 		# @todo Implement STATE_LISTEN
 
 		if self.state in (TCPState.STATE_SYN_SENT, TCPState.STATE_SYN_RECEIVED):
-			self.dst_staged.append(data)
+			self.dst_staged_buffer.append(data)
 			return
 
 		if self.state in (TCPState.STATE_ESTABLISHED, TCPState.STATE_CLOSE_WAIT):
-			pass
+			self.dst_staged_buffer.append(data)
+			return
 
 
 class TCPListener:

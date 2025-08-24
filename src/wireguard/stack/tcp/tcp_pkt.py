@@ -3,14 +3,13 @@ import struct
 from typing import Optional
 from enum import IntEnum
 
-from ..protocols import InternetProtocol
-from ..internet_checksum import Checksum
+from ..internet import Protocols
+from ..checksum import Checksum
 from ..ipv4 import IPv4Packet
 from .tcp_opt import TCPOptionKind, TCPOption, tcp_opt_decode, tcp_opt_encode
 
 # yapf: disable
 # RFC 9293 @ 3.1
-TCP_STRUCT_HDR_PSEUDO_V4 = "!IIxBH"
 TCP_STRUCT_HDR_PARAMS    = "!HHIIHH"
 TCP_STRUCT_HDR_CHECKSUM  = "!H"
 TCP_STRUCT_HDR_URG_PTR   = "!H"
@@ -58,6 +57,8 @@ def tcp_decode_offset_control(value: int):
 
 
 class TCPPacket:
+	protocol_number = Protocols.IP_TCP
+
 	def __init__(
 		self,
 		src_port: Optional[int] = None,
@@ -98,10 +99,6 @@ class TCPPacket:
 			self.urg_ptr,
 		)
 
-	@property
-	def protocol_number(self):
-		return InternetProtocol.IP_TCP
-
 	def opt_get(self, kind: TCPOptionKind):
 		for opt in self.options:
 			if opt.kind == kind:
@@ -114,7 +111,7 @@ class TCPPacket:
 			opt = TCPOption(kind)
 			self.options.append(opt)
 
-		for key, val in kwargs:
+		for key, val in kwargs.items():
 			opt.__dict__[key] = val
 
 	def encode_packet_ipv4(self, ipv4: IPv4Packet):
@@ -124,13 +121,7 @@ class TCPPacket:
 
 		header_len = 5 + hdr_options_size // 4
 
-		hdr_pseudo = struct.pack(
-			TCP_STRUCT_HDR_PSEUDO_V4,
-			ipv4.src_addr,
-			ipv4.dst_addr,
-			self.protocol_number,
-			header_len * 4 + len(payload),
-		)
+		hdr_pseudo = ipv4.encode_pseudo(self.protocol_number, header_len * 4 + len(payload))
 		hdr_params = struct.pack(
 			TCP_STRUCT_HDR_PARAMS,
 			self.src_port,
@@ -205,17 +196,9 @@ class TCPPacket:
 		payload = packet[hdr_length * 4:]
 
 		if verify_checksum:
-			hdr_pseudo = struct.pack(
-				TCP_STRUCT_HDR_PSEUDO_V4,
-				ipv4.src_addr,
-				ipv4.dst_addr,
-				self.protocol_number,
-				len(packet),
-			)
-
 			checksum_state = self._checksum_state
 			checksum_state.reset()
-			checksum_state.update(hdr_pseudo)
+			checksum_state.update(ipv4.encode_pseudo(self.protocol_number, len(packet)))
 			checksum_state.update(hdr_params)
 			checksum_state.update(hdr_urg_ptr)
 

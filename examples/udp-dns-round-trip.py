@@ -1,3 +1,31 @@
+"""
+Query 1
+Round trip time: 0.468
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 58244
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+;; QUESTION SECTION:
+;www.google.com.                IN      A
+;; ANSWER SECTION:
+www.google.com.         290     IN      A       142.250.70.228
+Query 2
+Round trip time: 0.469
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 39359
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+;; QUESTION SECTION:
+;www.google.com.                IN      A
+;; ANSWER SECTION:
+www.google.com.         290     IN      A       142.250.70.228
+Query 3
+Round trip time: 0.469
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 55343
+;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+;; QUESTION SECTION:
+;www.google.com.                IN      A
+;; ANSWER SECTION:
+www.google.com.         289     IN      A       142.250.70.228
+...
+"""
+
 import random
 import socket
 import base64
@@ -5,13 +33,12 @@ import time
 
 from src.wireguard.wireguard import Initiator, PrivateKey, PublicKey
 from src.wireguard.functions import wg_pad
-from src.wireguard.stack.ip import ip_packet_val
-from src.wireguard.stack.protocols import InternetProtocol, internet_protocol_to_str
+from src.wireguard.stack.internet import Protocols, internet_protocol_to_str, ip_packet_val
 from src.wireguard.stack.ipv4 import IPv4Packet
 from src.wireguard.stack.udp import UDPPacket
 
 from load_environ import (
-	client_addr,
+	client_addr_v4,
 	client_key,
 	server_addr,
 	server_key,
@@ -68,7 +95,7 @@ while True:
 		udp_send.dst_port = DNS_PORT
 		udp_send.payload = query.pack()
 
-		ipv4_send.src_addr = addr_to_int(client_addr)
+		ipv4_send.src_addr = addr_to_int(client_addr_v4)
 		ipv4_send.dst_addr = addr_to_int(DNS_SERVER)
 		ipv4_send.payload = udp_send
 
@@ -97,7 +124,7 @@ while True:
 
 		ipv4_recv.decode_packet(decoded)
 
-		if ipv4_recv.protocol != InternetProtocol.IP_UDP:
+		if ipv4_recv.protocol != Protocols.IP_UDP:
 			print(f"Received packet of type {internet_protocol_to_str(ipv4_recv.protocol)}")
 			continue
 

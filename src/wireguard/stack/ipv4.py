@@ -3,8 +3,8 @@ import struct
 from typing import Optional
 from enum import IntEnum
 
-from .protocols import InternetProtocol, internet_protocol_to_str
-from .internet_checksum import Checksum
+from .internet import Protocols, internet_protocol_to_str
+from .checksum import Checksum
 
 
 # https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml#dscp-registry-2
@@ -102,6 +102,7 @@ def ipv4_decode_flags_offset(value: int):
 
 
 # yapf: disable
+IPV4_STRUCT_PSEUDO_HDR    = "!IIxBH"
 IPV4_STRUCT_HDR_PARAMS    = "!BBHHHBB"
 IPV4_STRUCT_HDR_CHECKSUM  = "!H"
 IPV4_STRUCT_HDR_ADDRESSES = "!II"
@@ -118,7 +119,7 @@ class IPv4Packet:
 		self,
 		src_addr: Optional[int] = None,
 		dst_addr: Optional[int] = None,
-		protocol: Optional[InternetProtocol | int] = None,
+		protocol: Optional[Protocols | int] = None,
 		payload = None,
 		dscp = IPv4ServiceType.ST_CS0,
 		ecn = IPv4Congestion.ECN_INCAPABLE,
@@ -275,3 +276,6 @@ class IPv4Packet:
 		self.dscp = dscp
 		self.ecn = ecn
 		self.ttl = ttl
+
+	def encode_pseudo(self, protocol_number: int, length: int):
+		return struct.pack(IPV4_STRUCT_PSEUDO_HDR, self.src_addr, self.dst_addr, protocol_number, length)

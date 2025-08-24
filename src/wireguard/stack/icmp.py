@@ -4,8 +4,8 @@ from typing import Optional
 from types import SimpleNamespace
 from enum import IntEnum
 
-from .internet_checksum import Checksum
-from .protocols import InternetProtocol
+from .internet import Protocols
+from .checksum import Checksum
 from .ipv4 import IPv4Packet
 
 # yapf: disable
@@ -124,6 +124,8 @@ class ICMPValues(SimpleNamespace):
 
 
 class ICMPPacket:
+	protocol_number = Protocols.IP_ICMPV4
+
 	def __init__(self, msg_type: ICMPType = ICMPType(0), msg_code: int = 0):
 		self._checksum_state = Checksum()
 
@@ -145,10 +147,6 @@ class ICMPPacket:
 			self.checksum,
 			self.checksum_valid is None and "Unknown" or self.checksum_valid,
 		)
-
-	@property
-	def protocol_number(self):
-		return InternetProtocol.IP_ICMPV4
 
 	def get_type_meaning(self):
 		msg_type = self.msg_type

@@ -2,12 +2,11 @@ import struct
 
 from typing import Optional
 
-from .protocols import InternetProtocol
-from .internet_checksum import Checksum
+from .internet import Protocols
+from .checksum import Checksum
 from .ipv4 import IPv4Packet
 
 # yapf: disable
-UDP_STRUCT_HDR_PSEUDO_V4 = "!IIxBH"
 UDP_STRUCT_HDR_PARAMS    = "!HHH"
 UDP_STRUCT_HDR_CHECKSUM  = "!H"
 UDP_LENGTH_HDR_PARAMS    = struct.calcsize(UDP_STRUCT_HDR_PARAMS)
@@ -17,6 +16,8 @@ UDP_LENGTH_HDR           = UDP_LENGTH_HDR_PARAMS + UDP_LENGTH_HDR_CHECKSUM
 
 
 class UDPPacket:
+	protocol_number = Protocols.IP_UDP
+
 	def __init__(self, src_port: Optional[int] = None, dst_port: Optional[int] = None, payload: Optional[bytes] = None):
 		self._checksum_state = Checksum()
 
@@ -35,25 +36,23 @@ class UDPPacket:
 			self.checksum_valid,
 		)
 
-	@property
-	def protocol_number(self):
-		return InternetProtocol.IP_UDP
-
 	def encode_packet_ipv4(self, ipv4: IPv4Packet):
 		payload = self.payload or b""
 
 		length = len(payload) + UDP_LENGTH_HDR
 
-		hdr_pseudo = struct.pack(UDP_STRUCT_HDR_PSEUDO_V4, ipv4.src_addr, ipv4.dst_addr, self.protocol_number, length)
 		hdr_params = struct.pack(UDP_STRUCT_HDR_PARAMS, self.src_port, self.dst_port, length)
 
 		checksum_state = self._checksum_state
 		checksum_state.reset()
-		checksum_state.update(hdr_pseudo)
+		checksum_state.update(ipv4.encode_pseudo(self.protocol_number, length))
 		checksum_state.update(hdr_params)
 		checksum_state.update(payload)
 
 		checksum = checksum_state.finalize()
+
+		if checksum == 0:
+			checksum = 0xFFFF
 
 		self.checksum = checksum
 		self.checksum_valid = True
@@ -81,13 +80,9 @@ class UDPPacket:
 		checksum_received = struct.unpack(UDP_STRUCT_HDR_CHECKSUM, hdr_checksum)[0]
 
 		if verify_checksum and checksum_received != 0x0000:
-			hdr_pseudo = struct.pack(
-				UDP_STRUCT_HDR_PSEUDO_V4, ipv4.src_addr, ipv4.dst_addr, self.protocol_number, length
-			)
-
 			checksum_state = self._checksum_state
 			checksum_state.reset()
-			checksum_state.update(hdr_pseudo)
+			checksum_state.update(ipv4.encode_pseudo(self.protocol_number, length))
 			checksum_state.update(hdr_params)
 			checksum_state.update(payload)
 

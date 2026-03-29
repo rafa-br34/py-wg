@@ -10,7 +10,7 @@
 
 ## Configuring and running the examples
 
-To setup the wireguard parameters `.env-template` file with the appropriate values and rename it to `.env`. The examples will read the configuration from this file.
+To setup the WireGuard parameters copy the `.env-template` file, set the appropriate values, and rename the file to `.env`. The examples will the automatically read configuration data from this file.
 Here's a brief overview of the required variables:
 
 - `WG_INITIATOR_KEY_PRI`: The private key of the initiator.
@@ -53,8 +53,8 @@ import base64
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
-ACCOUNT_NUMBER = "[REDACTED]"
-ACCOUNT_DEVICE = "[REDACTED]"
+ACCOUNT_NUMBER = "[REDACTED]" # Your Mullvad account number
+ACCOUNT_DEVICE = "[REDACTED]" # The device name to reset the keys for
 
 session = requests.session()
 
@@ -105,4 +105,4 @@ In the future more examples will be added to demonstrate different use cases of 
 
 - Creating a WireGuard server.
 - Establishing a 2-way TCP connection over WireGuard.
-- Performing a full HTTP(S) request over WireGuard + `requests`.
+- Performing a full HTTP(S) request over WireGuard utilizing `requests`.

@@ -42,6 +42,9 @@ pip install git+https://github.com/rafa-br34/py-wg.git
 
 ## Usage
 
+> [!IMPORTANT]  
+> Currently this project is in its early stages. Expect breaking changes going forward.
+
 For usage examples please refer to the [examples](/examples/README.md) directory. The examples demonstrate how to use the library to create WireGuard peers, encode packets, send packets, and manage inbound packets.
 
 A documentation will be added in the future, but for now, the examples should provide enough information to get started.

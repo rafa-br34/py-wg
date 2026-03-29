@@ -104,7 +104,7 @@ class UnitHandshake(unittest.TestCase):
 			check_derivation(self, src_handshake, dst_handshake)
 
 
-class UnitTimerLogic(unittest.TestCase):
+class UnitTimedLogic(unittest.TestCase):
 	def setUp(self):
 		self._monotonic_function = time.monotonic
 		self._monotonic_time = 0
@@ -167,5 +167,5 @@ class UnitTimerLogic(unittest.TestCase):
 
 UNIT_CLASSES = [
 	UnitHandshake,
-	UnitTimerLogic,
+	UnitTimedLogic,
 ]

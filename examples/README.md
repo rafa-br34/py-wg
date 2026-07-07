@@ -18,6 +18,9 @@ Here's a brief overview of the required variables:
 - `WG_RESPONDER_KEY_PUB`: The public key of the responder.
 - `WG_RESPONDER_ADDR` & `WG_RESPONDER_PORT`: The address and port of the responder.
 
+> [!IMPORTANT]
+> Do not use subnets in addresses, otherwise you will get an "illegal address" exception.
+
 The examples are meant to be ran in this directory without the module installed, so you can run them by using `PYTHONPATH=../ py <example_name>.py` in this directory.
 If you desire to run the examples with the module installed, you will first need remove the `src` part from the imports.
 
@@ -45,49 +48,10 @@ Where:
 - `PublicKey` is the `WG_RESPONDER_KEY_PUB`.
 - `Endpoint` is the `WG_RESPONDER_ADDR` and `WG_RESPONDER_PORT`.
 
-Alternatively if you don't want to delete a device, you can manually request the Mullvad API to regenerate the keys for a device, like so:
+Alternatively, use the `get-mullvad-creds.py` utility to register a new WireGuard key and print the credentials in `.env`-compatible format:
 
-```python
-import requests
-import base64
-
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-
-ACCOUNT_NUMBER = "[REDACTED]" # Your Mullvad account number
-ACCOUNT_DEVICE = "[REDACTED]" # The device name to reset the keys for
-
-session = requests.session()
-
-result = session.post("https://api.mullvad.net/auth/v1/token", json = {"account_number": str(ACCOUNT_NUMBER)})
-
-session.headers["Authorization"] = "Bearer " + result.json()["access_token"]
-
-result = session.get("https://api.mullvad.net/accounts/v1/devices")
-
-for device in result.json():
-    if device["name"] != ACCOUNT_DEVICE.lower():
-        continue
-
-    pri_key = X25519PrivateKey.generate()
-    pub_key = pri_key.public_key()
-
-    pri_key = base64.b64encode(pri_key.private_bytes_raw()).decode()
-    pub_key = base64.b64encode(pub_key.public_bytes_raw()).decode()
-
-    ident = device["id"]
-
-    result = session.put(f"https://api.mullvad.net/accounts/v1/devices/{ident}/pubkey", json = {"pubkey": pub_key})
-    device = result.json()
-
-    print(
-        "IPv4: {}\nIPv6: {}\nPrivate key: {}\nPublic key: {}".format(
-            device["ipv4_address"],
-            device["ipv6_address"],
-            pri_key,
-            pub_key,
-        )
-    )
-    break
+```bash
+python get-mullvad-creds.py --account <your-account-number>
 ```
 
 To get the servers simply open [api.mullvad.net/www/relays/all](https://api.mullvad.net/www/relays/all/) in your browser and select the desired server.

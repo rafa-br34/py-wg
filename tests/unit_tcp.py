@@ -17,6 +17,7 @@ import unittest
 import random
 
 from utilities import iter_vec2, compare_list
+from typing import cast
 
 
 class UnitBitwiseCodecs(unittest.TestCase):
@@ -43,8 +44,9 @@ class UnitOptionsCodecs(unittest.TestCase):
 		decoded_a = list(tcp_opt_decode(encoded_a))
 
 		self.assertNotIn(None, decoded_a, "Got None in the first re-encoding")
+		self.assertIsNotNone(decoded_a)
 
-		encoded_b, _size = tcp_opt_encode(decoded_a)
+		encoded_b, _size = tcp_opt_encode(cast(list[TCPOption], decoded_a))
 		decoded_b = list(tcp_opt_decode(encoded_b))
 
 		self.assertNotIn(None, decoded_b, "Got None in the second re-encoding")
@@ -134,8 +136,9 @@ class UnitOptionsCodecs(unittest.TestCase):
 		opt = TCPOption(kind = TCPOptionKind.OPT_SACK_CAPABLE)
 		encoded, size = tcp_opt_encode([opt])
 		decoded = list(tcp_opt_decode(encoded))
+
 		self.assertEqual(len(decoded), 1)
-		self.assertEqual(decoded[0].kind, TCPOptionKind.OPT_SACK_CAPABLE)
+		self.assertEqual(cast(TCPOption, decoded[0]).kind, TCPOptionKind.OPT_SACK_CAPABLE)
 
 	def test_options_fuzzing(self):
 		candidates = [
@@ -751,9 +754,10 @@ class UnitListener(unittest.TestCase):
 				window = 65535,
 			)
 		)
+
 		accepted = ln.accept()
 		self.assertIsNotNone(accepted)
-		self.assertEqual(accepted.state, TCPState.STATE_ESTABLISHED)
+		self.assertEqual(cast(TCPConnection, accepted).state, TCPState.STATE_ESTABLISHED)
 
 	def test_accept_returns_none_before_established(self):
 		ln = TCPListener(0x0A000001, 80)

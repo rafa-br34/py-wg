@@ -1073,7 +1073,7 @@ class TCPListener:
 
 		return None
 
-	def accept(self):
+	def accept(self) -> TCPConnection | None:
 		for key, conn in tuple(self._pending.items()):
 			if conn.state == TCPState.STATE_ESTABLISHED:
 				del self._pending[key]

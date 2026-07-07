@@ -131,7 +131,31 @@ class TCPOptWindow(TCPOptionCodec):
 		opt.window_scale = opt.data[0]
 
 
-# Skip OPT_SACK_CAPABLE
+class TCPOptSACKCapable(TCPOptionCodec):
+	kind = TCPOptionKind.OPT_SACK_CAPABLE
+	size = 2
+
+	@staticmethod
+	def encode(opt: TCPOption):
+		opt.data = b""
+
+	@staticmethod
+	def decode(opt: TCPOption):
+		pass
+
+
+class TCPOptTimestamp(TCPOptionCodec):
+	kind = TCPOptionKind.OPT_TIMESTAMP
+	size = 10
+
+	@staticmethod
+	def encode(opt: TCPOption):
+		opt._check_keys({"tsval", "tsecr"})
+		opt.data = struct.pack("!II", opt.tsval & 0xFFFFFFFF, opt.tsecr & 0xFFFFFFFF)
+
+	@staticmethod
+	def decode(opt: TCPOption):
+		opt.tsval, opt.tsecr = struct.unpack("!II", opt.data)
 
 
 class TCPOptSACK(TCPOptionCodec):
@@ -163,7 +187,9 @@ class TCPOptSACK(TCPOptionCodec):
 
 tcp_opt_registry_set(TCPOptMSS)
 tcp_opt_registry_set(TCPOptWindow)
+tcp_opt_registry_set(TCPOptSACKCapable)
 tcp_opt_registry_set(TCPOptSACK)
+tcp_opt_registry_set(TCPOptTimestamp)
 
 
 def tcp_opt_encode(options: list[TCPOption]) -> tuple[bytes, int]:
@@ -174,6 +200,9 @@ def tcp_opt_encode(options: list[TCPOption]) -> tuple[bytes, int]:
 
 		total_size += option.size
 		total_size += (4 - total_size % 4) % 4
+
+	if total_size % 4:
+		total_size += 4 - (total_size % 4)
 
 	pointer = 0
 	buffer = memoryview(bytearray(total_size))

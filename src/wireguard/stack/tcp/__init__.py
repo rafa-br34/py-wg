@@ -17,12 +17,16 @@ from .tcp_opt import (
 	tcp_opt_decode,
 	TCPOptMSS,
 	TCPOptWindow,
+	TCPOptSACKCapable,
 	TCPOptSACK,
+	TCPOptTimestamp,
 )
+from .tcp_timers import TCPTimers
 from .tcp_fsm import (
 	initial_sequence_number,
 	TCPState,
 	TCPConnection,
+	TCPListener,
 )
 
 __all__ = [
@@ -42,8 +46,12 @@ __all__ = [
 	"tcp_opt_decode",
 	"TCPOptMSS",
 	"TCPOptWindow",
+	"TCPOptSACKCapable",
 	"TCPOptSACK",
+	"TCPOptTimestamp",
 	"initial_sequence_number",
 	"TCPState",
 	"TCPConnection",
+	"TCPTimers",
+	"TCPListener",
 ]

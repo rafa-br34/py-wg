@@ -1,16 +1,14 @@
-from .wireguard import (
+from .initiator import (
 	Initiator,
-	PrivateKey,
-	PublicKey,
 )
 
+from .async_initiator import AsyncInitiator
 from .handshake import Handshake
 from .keypair import KeyPair
 
 __all__ = [
+	"AsyncInitiator",
 	"Initiator",
-	"PrivateKey",
-	"PublicKey",
 	"Handshake",
 	"KeyPair",
 ]

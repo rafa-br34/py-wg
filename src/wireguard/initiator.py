@@ -3,10 +3,16 @@ import struct
 import time
 
 from typing import Optional
-from nacl.public import PrivateKey, PublicKey
 
 from .exceptions import WireguardException
-from .functions import wg_aead_encrypt, wg_aead_decrypt
+from .functions import (
+	wg_aead_encrypt,
+	wg_aead_decrypt,
+	WireguardPubKey,
+	WireguardPriKey,
+	wg_as_pub_key,
+	wg_as_pri_key,
+)
 from .constants import (
 	MessageTypes,
 	STRUCT_HEADER,
@@ -38,9 +44,9 @@ def wg_ident_header(pkt: memoryview) -> Optional[int]:
 class Initiator:
 	def __init__(
 		self,
-		initiator_pri: Optional[PrivateKey] = None,
-		responder_pub: Optional[PublicKey] = None,
-		preshared_key: Optional[bytes] = None
+		initiator_pri: Optional[WireguardPriKey] = None,
+		responder_pub: Optional[WireguardPubKey] = None,
+		preshared_key: Optional[bytes] = None,
 	):
 		"""
 			Exists at a **invalid state** if created without arguments, in such case call `reinitialize` before use.
@@ -53,17 +59,25 @@ class Initiator:
 		if initiator_pri is not None or responder_pub is not None:
 			raise ValueError("Received only one of the two keys (initiator private key, responder public key)")
 
-	def reinitialize(self, initiator_pri: PrivateKey, responder_pub: PublicKey, preshared_key: Optional[bytes] = None):
-		self.responder_pub = responder_pub
+	def reinitialize(
+		self,
+		initiator_pri: WireguardPriKey,
+		responder_pub: WireguardPubKey,
+		preshared_key: Optional[bytes] = None,
+	):
+		_initiator_pri = wg_as_pri_key(initiator_pri)
+		_responder_pub = wg_as_pub_key(responder_pub)
 
-		self.initiator_pri = initiator_pri
-		self.initiator_pub = initiator_pri.public_key
+		self.responder_pub = _responder_pub
+
+		self.initiator_pri = _initiator_pri
+		self.initiator_pub = _initiator_pri.public_key
 
 		self.prev_keypair = KeyPair()
 		self.curr_keypair = KeyPair()
 
 		self.staged_outbound = collections.deque() # What needs to be sent to the server
-		self.handshake = Handshake(initiator_pri, responder_pub, preshared_key)
+		self.handshake = Handshake(_initiator_pri, _responder_pub, preshared_key)
 
 		self.state_connected = False
 		self.state_reconnect_begin = None

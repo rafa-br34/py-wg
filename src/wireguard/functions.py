@@ -1,5 +1,6 @@
 import hashlib
 import random
+import base64
 import hmac
 import math
 import time
@@ -11,6 +12,30 @@ from nacl.bindings import (
 	crypto_aead_xchacha20poly1305_ietf_decrypt as xchacha20poly1305_decrypt,
 	crypto_scalarmult as wg_x25519_exchange,
 )
+from nacl.public import PrivateKey, PublicKey
+from typing import Union, Type, Any
+
+
+def wg_parse_key(key: Any, target: Type = bytes):
+	if isinstance(key, target):
+		return key
+	elif isinstance(key, str):
+		return target(base64.b64decode(key))
+	else:
+		return target(key)
+
+
+WireguardSharedKey = Union[str | bytes]
+WireguardPubKey = Union[PublicKey | str | bytes]
+WireguardPriKey = Union[PrivateKey | str | bytes]
+
+
+def wg_as_pub_key(key: WireguardPubKey) -> PublicKey:
+	return wg_parse_key(key, PublicKey)
+
+
+def wg_as_pri_key(key: WireguardPriKey) -> PrivateKey:
+	return wg_parse_key(key, PrivateKey)
 
 
 def wg_hash(val: bytes) -> bytes:
@@ -95,6 +120,11 @@ def wg_time():
 
 
 __all__ = [
+	"WireguardPubKey",
+	"WireguardPriKey",
+	"wg_parse_key",
+	"wg_as_pub_key",
+	"wg_as_pri_key",
 	"wg_x25519_exchange",
 	"wg_hash",
 	"wg_mac",

@@ -1,5 +1,11 @@
+# Tests
+.pytest_cache/
+.coverage
+
+# Cache
 __pycache__/
+*.egg-info
+
+# Dist & others
 experimentation/
 dist/
-
-*.egg-info

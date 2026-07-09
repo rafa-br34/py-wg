@@ -1,4 +1,5 @@
 import collections
+import random
 import struct
 import time
 
@@ -8,6 +9,7 @@ from .exceptions import WireguardException
 from .functions import (
 	wg_aead_encrypt,
 	wg_aead_decrypt,
+	wg_pad,
 	WireguardPubKey,
 	WireguardPriKey,
 	wg_as_pub_key,
@@ -25,6 +27,7 @@ from .constants import (
 	STATE_REJECT_AFTER_MSGS,
 	STATE_REKEY_AFTER_TIME,
 	STATE_REJECT_AFTER_TIME,
+	STATE_REJECT_AFTER_TIME_RX,
 	STATE_REKEY_ATTEMPT_TIME,
 	STATE_REKEY_TIMEOUT,
 	STATE_KEEPALIVE_TIMEOUT,
@@ -75,6 +78,7 @@ class Initiator:
 
 		self.prev_keypair = KeyPair()
 		self.curr_keypair = KeyPair()
+		self.next_keypair = KeyPair()
 
 		self.staged_outbound = collections.deque() # What needs to be sent to the server
 		self.handshake = Handshake(_initiator_pri, _responder_pub, preshared_key)
@@ -86,7 +90,7 @@ class Initiator:
 		self.state_rekey_staged = False
 
 	def get_keypair(self, src_ident = None, dst_ident = None):
-		for keypair in (self.curr_keypair, self.prev_keypair):
+		for keypair in (self.curr_keypair, self.prev_keypair, self.next_keypair):
 			if keypair.src_ident == src_ident or keypair.dst_ident == dst_ident:
 				return keypair
 
@@ -105,9 +109,16 @@ class Initiator:
 		if not self.state_connected:
 			raise WireguardException("Can't encode transport data without being connected.")
 
+		# 6.2 refuse to send after Reject-After limits
+		if keypair.send_count >= STATE_REJECT_AFTER_MSGS:
+			raise WireguardException("Reject-After-Messages limit reached")
+
+		if time.monotonic() - keypair.lifetime >= STATE_REJECT_AFTER_TIME:
+			raise WireguardException("Reject-After-Time limit reached")
+
 		transport_pkt = HDR_TRANSPORT
 		transport_pkt += struct.pack(STRUCT_TRANSPORT, keypair.dst_ident, keypair.send_count)
-		transport_pkt += wg_aead_encrypt(keypair.send_key, keypair.send_count, packet, b"")
+		transport_pkt += wg_aead_encrypt(keypair.send_key, keypair.send_count, wg_pad(packet), b"")
 
 		keypair.next_send()
 
@@ -126,6 +137,17 @@ class Initiator:
 
 		if not keypair:
 			raise WireguardException("Could not find keypair for identifier")
+
+		# 5.4.6 replay attack protection using sliding window
+		if not keypair.replay.check(counter):
+			raise WireguardException("Replayed transport message detected")
+
+		# 6.2 refuse to receive after Reject-After limits
+		if keypair.recv_count >= STATE_REJECT_AFTER_MSGS:
+			raise WireguardException("Reject-After-Messages limit reached on receive")
+
+		if time.monotonic() - keypair.lifetime >= STATE_REJECT_AFTER_TIME:
+			raise WireguardException("Reject-After-Time limit reached on receive")
 
 		data = wg_aead_decrypt(keypair.recv_key, counter, packet_content, b"")
 
@@ -159,18 +181,19 @@ class Initiator:
 			case MessageTypes.MSG_COOKIE_REPLY:
 				if renew_session:
 					self.handshake.decode_cookie_reply(packet)
-					self._stage_handshake_req()
+					# 6.6 do not immediately retransmit; let the Rekey-Timeout timer handle it
 
 			case MessageTypes.MSG_TRANSPORT:
 				return self.decode_transport(packet)
 
 		if renew_keypair:
-			a = self.prev_keypair
-			b = self.curr_keypair
-			self.curr_keypair = a
-			self.prev_keypair = b
+			# 6.3 three-slot key rotation: prev <- curr <- next
+			old_prev = self.prev_keypair
+			self.prev_keypair = self.curr_keypair
+			self.curr_keypair = self.next_keypair
+			self.next_keypair = old_prev
 
-			self.handshake.derive_keypair(a)
+			self.handshake.derive_keypair(self.curr_keypair)
 
 			self.state_reconnect_begin = None
 			self.state_reconnect_timer = 0
@@ -199,11 +222,13 @@ class Initiator:
 		curr_time = time.monotonic()
 
 		rekey_msgs = curr_keypair.send_count > STATE_REKEY_AFTER_MSGS
-		# Should be only checked after tx
-		rekey_time = curr_time - curr_keypair.lifetime > STATE_REKEY_AFTER_TIME
-		# No need to check rx (Reject-After-Time - Keepalive-Timeout - Rekey-Timeout).
-		# This runs every iteration and tx will always fire first anyways.
-		if (rekey_time or rekey_msgs) and self.state_rekey_begin is None:
+		# 6.2 time-based rekey restricted to initiator of current session
+		rekey_time_send = (self.handshake.initiator and curr_time - curr_keypair.lifetime > STATE_REKEY_AFTER_TIME)
+		rekey_time_recv = (
+			self.handshake.initiator and curr_keypair.recv_last > 0
+			and curr_time - curr_keypair.lifetime > STATE_REJECT_AFTER_TIME_RX
+		)
+		if (rekey_time_send or rekey_msgs or rekey_time_recv) and self.state_rekey_begin is None:
 			self.state_rekey_begin = time.monotonic()
 
 	# 6.5 Passive Keepalive
@@ -211,12 +236,13 @@ class Initiator:
 		curr_keypair = self.curr_keypair
 		curr_time = time.monotonic()
 
-		# @todo This FSM is still very inaccurate to the WireGuard paper.
+		# 6.5 dead connection detection: no data received for Keepalive-Timeout + Rekey-Timeout
+		state_timeout_dst = (
+			curr_keypair.recv_last > 0
+			and curr_time - curr_keypair.recv_last > STATE_KEEPALIVE_TIMEOUT + STATE_REKEY_TIMEOUT
+		)
 
-		state_timeout_src = curr_time - curr_keypair.send_last > STATE_REKEY_TIMEOUT
-		state_timeout_dst = curr_time - curr_keypair.recv_last > STATE_KEEPALIVE_TIMEOUT + STATE_REKEY_TIMEOUT
-
-		if (state_timeout_src and state_timeout_dst) and self.state_connected:
+		if state_timeout_dst and self.state_connected:
 			self.state_connected = False
 			self.state_reconnect_begin = curr_time
 			self.state_reconnect_timer = curr_time
@@ -228,15 +254,20 @@ class Initiator:
 			if curr_time - reconnect_begin >= STATE_REKEY_ATTEMPT_TIME:
 				self.state_reconnect_begin = None
 			elif curr_time - reconnect_timer >= STATE_REKEY_TIMEOUT:
-				self.state_reconnect_timer = curr_time
+				# 6.1 add jitter to prevent thundering herd
+				jitter = random.uniform(0, STATE_REKEY_TIMEOUT / 3)
+
+				self.state_reconnect_timer = curr_time + jitter
 				self._stage_handshake_req()
 
 		if not self.state_connected:
 			return
 
-		state_send_keepalive = curr_time - curr_keypair.send_last > STATE_KEEPALIVE_TIMEOUT
+		# 6.5 send keepalive when we have received data but haven't sent recently
+		state_has_received = curr_keypair.recv_last > 0
+		state_send_stale = curr_time - curr_keypair.send_last > STATE_KEEPALIVE_TIMEOUT
 
-		if state_send_keepalive:
+		if state_has_received and state_send_stale:
 			self.encode_transport(b"")
 
 	def update_state(self):

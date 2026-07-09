@@ -102,7 +102,7 @@ def wg_xaead_decrypt(key: bytes, nonce: bytes, msg: bytes, associated_data: byte
 
 def wg_pad(msg: bytes, block: int = 16):
 	msg_len = len(msg)
-	pad_len = math.ceil(msg_len / block) - msg_len
+	pad_len = (block - (msg_len % block)) % block
 
 	return msg + (b"\x00" * pad_len)
 

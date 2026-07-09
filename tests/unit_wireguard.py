@@ -2,6 +2,8 @@ import src.wireguard as wg
 
 from src.wireguard.constants import TEMPLATE_EMPTY_MAC, STATE_COOKIE_LIFETIME, LEN_MACS
 from src.wireguard.exceptions import WireguardHandshakeException
+from src.wireguard.functions import wg_pad
+from src.wireguard.packet_replay import PacketReplay
 
 import unittest
 import random
@@ -74,6 +76,17 @@ class UnitHandshake(unittest.TestCase):
 
 			check_handshake_equality(self, src_handshake, dst_handshake)
 			check_derivation(self, src_handshake, dst_handshake)
+
+	def test_timestamp_replay_rejection(self):
+		"""5.1: responder must reject handshake requests with timestamps <= last seen."""
+		src_handshake = self.src_handshake
+		dst_handshake = self.dst_handshake
+
+		encoded_req = src_handshake.encode_handshake_req()
+		dst_handshake.decode_handshake_req(encoded_req)
+
+		with self.assertRaises(WireguardHandshakeException):
+			dst_handshake.decode_handshake_req(encoded_req)
 
 	def test_key_derivation_cookie(self):
 		src_handshake = self.src_handshake
@@ -165,7 +178,66 @@ class UnitTimedLogic(unittest.TestCase):
 		time.monotonic = self._monotonic_function
 
 
+class UnitPacketReplay(unittest.TestCase):
+	def setUp(self):
+		self.replay = PacketReplay()
+
+	def test_valid_sequence(self):
+		for i in range(1, 10):
+			self.assertTrue(self.replay.check(i), f"Counter {i} should be accepted")
+
+	def test_reject_zero(self):
+		self.assertFalse(self.replay.check(0), "Counter zero must be rejected")
+
+	def test_reject_replay(self):
+		self.assertTrue(self.replay.check(1))
+		self.assertFalse(self.replay.check(1), "Same counter must be rejected as replay")
+
+	def test_reject_too_old(self):
+		self.assertTrue(self.replay.check(100))
+		self.assertFalse(self.replay.check(1), "Counter outside window must be rejected")
+
+	def test_out_of_order_within_window(self):
+		self.assertTrue(self.replay.check(10))
+		self.assertTrue(self.replay.check(5), "Out-of-order within window should be accepted")
+		self.assertFalse(self.replay.check(5), "Same out-of-order must be rejected as replay")
+
+	def test_window_sliding(self):
+		for i in range(1, 50):
+			self.assertTrue(self.replay.check(i))
+
+		self.assertFalse(self.replay.check(1), "Fallen outside window must be rejected")
+		self.assertTrue(self.replay.check(50), "New highest counter should be accepted")
+
+	def test_reset(self):
+		self.assertTrue(self.replay.check(1))
+		self.replay.reset()
+		self.assertTrue(self.replay.check(1), "After reset, old counter should be accepted again")
+
+
+class UnitPadding(unittest.TestCase):
+	def test_pad_empty(self):
+		self.assertEqual(wg_pad(b""), b"")
+
+	def test_pad_already_aligned(self):
+		self.assertEqual(wg_pad(b"A" * 16), b"A" * 16)
+
+	def test_pad_needs_padding(self):
+		result = wg_pad(b"A" * 20)
+		self.assertEqual(len(result), 32)
+		self.assertEqual(result[:20], b"A" * 20)
+		self.assertEqual(result[20:], b"\x00" * 12)
+
+	def test_pad_single_byte(self):
+		result = wg_pad(b"\x01")
+		self.assertEqual(len(result), 16)
+		self.assertEqual(result[0:1], b"\x01")
+		self.assertEqual(result[1:], b"\x00" * 15)
+
+
 UNIT_CLASSES = [
 	UnitHandshake,
 	UnitTimedLogic,
+	UnitPacketReplay,
+	UnitPadding,
 ]

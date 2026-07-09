@@ -102,6 +102,7 @@ class Handshake:
 		self.handshake_hash: bytes
 		self.chaining_key: bytes
 		self.timestamp: float
+		self.timestamp_last: Optional[float] = None
 
 		self.initiator: Optional[bool] = None
 
@@ -237,6 +238,11 @@ class Handshake:
 		else:
 			(pair.recv_key, pair.send_key) = wg_kdf2(self.chaining_key, b"")
 
+		# 5.4.5 zero ephemeral keys and chaining key from memory
+		self.src_ephemeral = None
+		self.dst_ephemeral = None
+		self.chaining_key = b'\x00' * 32
+
 	# 5.4.2 First Message: Initiator to Responder
 	def encode_handshake_req(self):
 		self._become_initiator()
@@ -258,6 +264,10 @@ class Handshake:
 		responder_pub = self.dst_key_pub.encode()
 
 		current_time = time.time()
+
+		# 5.1 ensure timestamp is monotonically increasing to prevent replay
+		if self.timestamp_last is not None and current_time <= self.timestamp_last:
+			current_time = self.timestamp_last + 0.000000001
 
 		handshake_hash = INITIAL_HANDSHAKE_HASH
 		chaining_key = INITIAL_CHAINING_KEY
@@ -344,6 +354,12 @@ class Handshake:
 		self.handshake_hash = handshake_hash
 		self.chaining_key = chaining_key
 		self.timestamp = decode_tai64n(decrypted_timestamp)
+
+		# 5.1 reject replayed timestamps
+		if self.timestamp_last is not None and self.timestamp <= self.timestamp_last:
+			raise WireguardHandshakeException("Handshake timestamp is not greater than the last received timestamp")
+
+		self.timestamp_last = self.timestamp
 
 	# 5.4.3 Second Message: Responder to Initiator
 	def encode_handshake_res(self):
@@ -444,7 +460,11 @@ class Handshake:
 
 		handshake_hash = wg_hash(handshake_hash + tau)
 
-		wg_aead_decrypt(key, 0, encrypted_empty, handshake_hash)
+		decrypted_empty = wg_aead_decrypt(key, 0, encrypted_empty, handshake_hash)
+
+		# 5.4.3 validate the empty plaintext field
+		if decrypted_empty != b"":
+			raise WireguardHandshakeException("Handshake response empty field must decrypt to an empty plaintext")
 
 		handshake_hash = wg_hash(handshake_hash + encrypted_empty)
 

@@ -21,7 +21,7 @@ import socket
 import base64
 import time
 
-from src.wireguard.wireguard import Initiator, PrivateKey, PublicKey
+from src.wireguard.initiator import Initiator
 from src.wireguard.functions import wg_pad
 from src.wireguard.stack.internet import Protocols, internet_protocol_to_str, ip_packet_val
 from src.wireguard.stack.ipv4 import IPv4Packet
@@ -42,7 +42,7 @@ ICMP_MESSAGE_LEN = 32
 ICMP_TIMEOUT = 5
 ICMP_SERVER = "2606:4700:4700::1111"
 
-peer = Initiator(PrivateKey(base64.b64decode(client_key)), PublicKey(base64.b64decode(server_key)))
+peer = Initiator(base64.b64decode(client_key), base64.b64decode(server_key))
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setblocking(False)

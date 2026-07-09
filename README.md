@@ -14,6 +14,8 @@ A pure python implementation of the WireGuard protocol.
   - [Performance](#performance)
   - [Installation](#installation)
   - [Usage](#usage)
+  - [Development](#development)
+    - [Running tests \& test coverage](#running-tests--test-coverage)
   - [Testing and troubleshooting](#testing-and-troubleshooting)
   - [References](#references)
 
@@ -48,6 +50,22 @@ pip install git+https://github.com/rafa-br34/py-wg.git
 For usage examples please refer to the [examples](/examples/README.md) directory. The examples demonstrate how to use the library to create WireGuard peers, encode packets, send packets, and manage inbound packets.
 
 A documentation will be added in the future, but for now, the examples should provide enough information to get started.
+
+## Development
+
+### Running tests & test coverage
+
+To run tests simply run
+
+```bash
+python run_tests.py
+```
+
+For the test coverage report run (this needs `pytest` to be installed)
+
+```bash
+PYTHONPATH=tests/ python -m pytest --cov=./src/ --cov-report=term-missing tests
+```
 
 ## Testing and troubleshooting
 

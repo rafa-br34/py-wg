@@ -17,7 +17,7 @@ import base64
 import time
 import copy
 
-from src.wireguard.wireguard import Initiator, PrivateKey, PublicKey
+from src.wireguard import Initiator, PrivateKey, PublicKey
 from src.wireguard.functions import wg_pad
 from src.wireguard.stack.internet import Protocols, internet_protocol_to_str, ip_packet_val
 from src.wireguard.stack.ipv4 import IPv4Packet

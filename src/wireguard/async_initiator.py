@@ -24,8 +24,11 @@ class AsyncInitiator:
 	):
 		self._initiator.reinitialize(initiator_pri, responder_pub, preshared_key)
 
+	def on_keepalive_tx(self, func: Callable):
+		self._events.attach_handler("keepalive_tx", func)
+
 	def on_keepalive_rx(self, func: Callable):
 		self._events.attach_handler("keepalive_rx", func)
 
-	def on_message_rx(self, func: Callable[[bytes]]):
+	def on_message_rx(self, func: Callable[[bytes], None]):
 		self._events.attach_handler("message_rx", func)

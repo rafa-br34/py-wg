@@ -35,7 +35,7 @@ def initial_sequence_number(src_addr, src_port, dst_addr, dst_port):
 	# 4µs~ per tick
 	counter = int(time.monotonic() * 250000) & 0xFFFFFFFF
 
-	return (counter + int.from_bytes(hashed[:4])) & 0xFFFFFFFF
+	return (counter + int.from_bytes(hashed[:4], "big")) & 0xFFFFFFFF
 
 
 # RFC 9293 @ 3.3.2

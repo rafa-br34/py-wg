@@ -441,7 +441,7 @@ class TCPConnection:
 					self._send_ack()
 			return
 
-		# 3: security check — skipped
+		# 3: security check (skipped)
 
 		# 4: check SYN bit
 		if fg_syn:

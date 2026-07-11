@@ -6,6 +6,7 @@ import time
 from typing import Optional
 
 from .exceptions import WireguardException
+from .events import Events
 from .functions import (
 	wg_aead_encrypt,
 	wg_aead_decrypt,
@@ -80,14 +81,38 @@ class Initiator:
 		self.curr_keypair = KeyPair()
 		self.next_keypair = KeyPair()
 
+		self._events = Events()
+
 		self.staged_outbound = collections.deque() # What needs to be sent to the server
 		self.handshake = Handshake(_initiator_pri, _responder_pub, preshared_key)
+		self.handshake._become_initiator()
 
 		self.state_connected = False
 		self.state_reconnect_begin = None
 		self.state_reconnect_timer = 0
 		self.state_rekey_begin = None
 		self.state_rekey_staged = False
+
+	def on_keepalive_tx(self, func):
+		self._events.attach_handler("keepalive_tx", func)
+
+	def on_keepalive_rx(self, func):
+		self._events.attach_handler("keepalive_rx", func)
+
+	def on_message_rx(self, func):
+		self._events.attach_handler("message_rx", func)
+
+	def on_handshake_complete(self, func):
+		self._events.attach_handler("handshake_complete", func)
+
+	def on_connection_lost(self, func):
+		self._events.attach_handler("connection_lost", func)
+
+	def on_handshake_tx_req(self, func):
+		self._events.attach_handler("handshake_tx_req", func)
+
+	def on_handshake_tx_res(self, func):
+		self._events.attach_handler("handshake_tx_res", func)
 
 	def get_keypair(self, src_ident = None, dst_ident = None):
 		for keypair in (self.curr_keypair, self.prev_keypair, self.next_keypair):
@@ -99,9 +124,11 @@ class Initiator:
 
 	def _stage_handshake_req(self):
 		self._stage_packet(self.handshake.encode_handshake_req())
+		self._events.fire_handler("handshake_tx_req")
 
 	def _stage_handshake_res(self):
 		self._stage_packet(self.handshake.encode_handshake_res())
+		self._events.fire_handler("handshake_tx_res")
 
 	def encode_transport(self, packet):
 		keypair = self.curr_keypair
@@ -154,8 +181,10 @@ class Initiator:
 		keypair.next_recv()
 
 		if data == b"":
+			self._events.fire_handler("keepalive_rx")
 			return None
 
+		self._events.fire_handler("message_rx", (data, ))
 		return data
 
 	def decode_packet(self, packet):
@@ -201,10 +230,18 @@ class Initiator:
 			self.state_rekey_begin = None
 			self.state_connected = True
 
+			self._events.fire_handler("handshake_complete")
+
 	def _state_rekey(self):
 		begin = self.state_rekey_begin
 
 		if begin is None:
+			return
+
+		# Reconnect already handles the handshake; don't fire a duplicate
+		if self.state_reconnect_begin is not None:
+			self.state_rekey_staged = False
+			self.state_rekey_begin = None
 			return
 
 		if time.monotonic() - begin > STATE_REKEY_TIMEOUT:
@@ -223,9 +260,9 @@ class Initiator:
 
 		rekey_msgs = curr_keypair.send_count > STATE_REKEY_AFTER_MSGS
 		# 6.2 time-based rekey restricted to initiator of current session
-		rekey_time_send = (self.handshake.initiator and curr_time - curr_keypair.lifetime > STATE_REKEY_AFTER_TIME)
+		rekey_time_send = (self.state_connected and self.handshake.initiator and curr_time - curr_keypair.lifetime > STATE_REKEY_AFTER_TIME)
 		rekey_time_recv = (
-			self.handshake.initiator and curr_keypair.recv_last > 0
+			self.state_connected and self.handshake.initiator and curr_keypair.recv_last > 0
 			and curr_time - curr_keypair.lifetime > STATE_REJECT_AFTER_TIME_RX
 		)
 		if (rekey_time_send or rekey_msgs or rekey_time_recv) and self.state_rekey_begin is None:
@@ -246,6 +283,8 @@ class Initiator:
 			self.state_connected = False
 			self.state_reconnect_begin = curr_time
 			self.state_reconnect_timer = curr_time
+
+			self._events.fire_handler("connection_lost")
 
 		reconnect_begin = self.state_reconnect_begin
 		reconnect_timer = self.state_reconnect_timer
@@ -269,6 +308,7 @@ class Initiator:
 
 		if state_has_received and state_send_stale:
 			self.encode_transport(b"")
+			self._events.fire_handler("keepalive_tx")
 
 	def update_state(self):
 		self._state_update_transport()

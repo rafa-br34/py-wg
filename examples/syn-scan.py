@@ -1,13 +1,12 @@
 """
 > PYTHONPATH=../ py syn-scan.py
-[OPEN] 45.33.32.156:53 0.469
-[OPEN] 45.33.32.156:22 0.656
-[OPEN] 45.33.32.156:80 0.656
-[OPEN] 45.33.32.156:9929 0.641
-[OPEN] 45.33.32.156:31337 0.641
+[OPEN] 45.33.32.156:53 0.404
+[OPEN] 45.33.32.156:22 0.667
+[OPEN] 45.33.32.156:80 0.672
+[OPEN] 45.33.32.156:9929 0.649
+[OPEN] 45.33.32.156:31337 0.630
 [OPEN] 45.33.32.156:9929 No prior SYN (Possible retransmission?)
 Finished scanning, waiting 20 seconds
-[OPEN] 45.33.32.156:31337 No prior SYN (Possible retransmission?)
 Done waiting
 """
 

@@ -186,8 +186,12 @@ class UnitPacketReplay(unittest.TestCase):
 		for i in range(1, 10):
 			self.assertTrue(self.replay.check(i), f"Counter {i} should be accepted")
 
-	def test_reject_zero(self):
-		self.assertFalse(self.replay.check(0), "Counter zero must be rejected")
+	def test_accept_zero(self):
+		self.assertTrue(self.replay.check(0), "Counter zero must be accepted")
+
+	def test_reject_zero_replay(self):
+		self.assertTrue(self.replay.check(0))
+		self.assertFalse(self.replay.check(0), "Same counter zero must be rejected as replay")
 
 	def test_reject_replay(self):
 		self.assertTrue(self.replay.check(1))

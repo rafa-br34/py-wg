@@ -20,6 +20,6 @@ class Events:
 	def detach_handler(self, name: str, func):
 		self.list_handlers(name).remove(func)
 
-	def fire_handler(self, name: str, args: Tuple[Any], kwargs: Dict[str, Any]):
+	def fire_handler(self, name: str, args: Tuple[Any] | Tuple = (), kwargs: Dict[str, Any] = {}):
 		for handler in self.list_handlers(name):
 			handler(*args, **kwargs)

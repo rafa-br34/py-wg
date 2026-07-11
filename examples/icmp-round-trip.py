@@ -1,3 +1,18 @@
+"""
+> PYTHONPATH=../ py icmp-round-trip.py
+Ping 1
+Round trip time: 0.366
+ICMPPacket(msg_type = Echo response (0), msg_code = Default (0), values = ICMPValues(identifier=32971, sequence=1, payload=b'X\x1d\x91}$[?\xf4F\xb3\x1ay\xd8\xab\xe5\xd7S\xc5\xc0=\xa8\xe29\xd8X\x7f\x97\r\xb5"\x16Y'), checksum = 0x5FD2, checksum_valid = True)
+Ping 2
+Round trip time: 0.369
+ICMPPacket(msg_type = Echo response (0), msg_code = Default (0), values = ICMPValues(identifier=48459, sequence=2, payload=b'2g\xb1\x15y\x98\xc8.\xc6c\x87\xff\x01\xee\xd1\xf1#Y\xc4#?\xbc\xa1]\xcfKg\x80\x0c\xf02\xe1'), checksum = 0xBBF6, checksum_valid = True)
+Ping 3
+Round trip time: 0.357
+ICMPPacket(msg_type = Echo response (0), msg_code = Default (0), values = ICMPValues(identifier=19569, sequence=3, payload=b'\xcd\x9b\xee\xd5V+Vv[\xf1L\xab_\xa7\xc2o\x91\t\xcb\xb1)kVLPU@`@\x82\xc4\xd0'), checksum = 0x0D49, checksum_valid = True)
+Ping 4
+...
+"""
+
 import random
 import socket
 import base64

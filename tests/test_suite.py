@@ -11,6 +11,7 @@ TEST_UNITS = [
 	"unit_udp",
 	"unit_icmp",
 	"unit_wireguard",
+	"unit_async_initiator",
 ]
 
 

@@ -10,9 +10,6 @@ class PacketReplay:
 		self.count = 0
 
 	def check(self, sequence):
-		if sequence == 0:
-			return False
-
 		bitmap_width = self.bitmap_width
 		bitmap = self.bitmap
 		count = self.count

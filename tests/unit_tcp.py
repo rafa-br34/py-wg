@@ -12,6 +12,7 @@ from src.wireguard.stack.tcp import (
 	TCPListener,
 	initial_sequence_number,
 )
+from src.wireguard.stack.ipv4 import IPv4Packet
 
 import unittest
 import random
@@ -773,6 +774,177 @@ class UnitListener(unittest.TestCase):
 		self.assertIsNone(ln.accept())
 
 
+class UnitEvents(unittest.TestCase):
+	"""TCPConnection event hooks."""
+
+	def setUp(self):
+		self.conn = TCPConnection()
+
+	def test_state_change_fires(self):
+		states = []
+		self.conn.on_state_change(lambda old, new: states.append((old, new)))
+		self.conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		self.assertEqual(len(states), 1)
+		self.assertEqual(states[0], (TCPState.STATE_CLOSED, TCPState.STATE_SYN_SENT))
+
+	def test_connection_established_fires(self):
+		called = []
+		self.conn.on_connection_established(lambda: called.append(1))
+		self.conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		self._handshake(self.conn)
+		self.assertEqual(called, [1])
+
+	def test_connection_closed_fires_on_abort(self):
+		called = []
+		self.conn.on_connection_closed(lambda: called.append(1))
+		self.conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		self._handshake(self.conn)
+		self.conn.event_abort()
+		self.assertEqual(called, [1])
+
+	def test_data_sent_fires(self):
+		called = []
+		self.conn.on_data_sent(lambda data: called.append(data))
+		self.conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		self._handshake(self.conn)
+		self.conn.event_send(b"hello")
+		self.assertEqual(len(called), 1)
+		self.assertEqual(called[0], b"hello")
+
+	def test_data_received_fires(self):
+		called = []
+		self.conn.on_data_received(lambda data: called.append(data))
+		self.conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		self._handshake(self.conn)
+		self.conn._recv_packet(
+			TCPPacket(
+				src_port = 80, dst_port = 12345,
+				flags = TCPFlags.FG_ACK, seq_num = 5001,
+				ack_num = self.conn.send_una, payload = b"world", window = 65535,
+			)
+		)
+		data = self.conn.event_receive(100)
+		self.assertEqual(len(called), 1)
+		self.assertEqual(called[0], b"world")
+		self.assertEqual(data, b"world")
+
+	def test_retransmit_fires(self):
+		called = []
+		self.conn.on_retransmit(lambda: called.append(1))
+		self.conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		# Fire RTO directly to trigger retransmit
+		self.conn._fire_timer("RTO")
+		self.assertEqual(called, [1])
+
+	def _handshake(self, conn):
+		conn._recv_packet(
+			TCPPacket(
+				src_port = conn.dst_port, dst_port = conn.src_port,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 5000, ack_num = conn.send_isn + 1, window = 65535,
+			)
+		)
+
+
+class UnitRetransmit(unittest.TestCase):
+	"""SYN retransmit: verify the SYN is re-enqueued with FG_SYN on RTO."""
+
+	def test_syn_retransmit_preserves_flags(self):
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+
+		# The original SYN should be in dst_retransmit and in_flight
+		self.assertEqual(len(conn.dst_retransmit), 1)
+		orig_syn = conn.dst_retransmit[0]
+		self.assertTrue(orig_syn.flags & TCPFlags.FG_SYN)
+		self.assertEqual(len(conn._in_flight), 1)
+
+		# Drain the original SYN (simulate sending it)
+		conn.dst_retransmit.clear()
+
+		# Fire RTO — should re-enqueue a SYN (not an ACK)
+		conn._fire_timer("RTO")
+		self.assertEqual(len(conn.dst_retransmit), 1)
+		retrans = conn.dst_retransmit[0]
+		self.assertTrue(retrans.flags & TCPFlags.FG_SYN, "Retransmitted SYN must have SYN flag")
+
+	def test_syn_rto_backoff(self):
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		conn.dst_retransmit.clear()
+		initial_rto = conn._rto
+
+		conn._fire_timer("RTO")
+		self.assertGreater(conn._rto, initial_rto, "RTO should double on retransmit")
+
+
+class UnitTCPPacketEncodeDecode(unittest.TestCase):
+	"""Round-trip encode/decode for tcp_pkt."""
+
+	def test_syn_encode_decode(self):
+		ipv4 = IPv4Packet()
+		ipv4.src_addr = 0x0A000001
+		ipv4.dst_addr = 0x0A000002
+
+		tcp = TCPPacket(
+			src_port = 12345, dst_port = 80,
+			flags = TCPFlags.FG_SYN, seq_num = 0x12345678,
+			ack_num = 0, window = 65535,
+		)
+		ipv4.payload = tcp
+		raw = ipv4.encode_packet()
+		tcp_raw = raw[20:]  # skip IPv4 header
+
+		tcp2 = TCPPacket()
+		tcp2.decode_packet_ipv4(tcp_raw, ipv4, verify_checksum=True)
+		self.assertTrue(tcp2.checksum_valid)
+		self.assertEqual(tcp2.src_port, 12345)
+		self.assertEqual(tcp2.dst_port, 80)
+		self.assertTrue(tcp2.flags & TCPFlags.FG_SYN)
+
+	def test_data_encode_decode(self):
+		ipv4 = IPv4Packet()
+		ipv4.src_addr = 0x0A000001
+		ipv4.dst_addr = 0x0A000002
+
+		tcp = TCPPacket(
+			src_port = 12345, dst_port = 80,
+			flags = TCPFlags.FG_ACK | TCPFlags.FG_PSH,
+			seq_num = 100, ack_num = 200, window = 65535,
+			payload = b"hello world",
+		)
+		ipv4.payload = tcp
+		raw = ipv4.encode_packet()
+		tcp_raw = raw[20:]
+
+		tcp2 = TCPPacket()
+		tcp2.decode_packet_ipv4(tcp_raw, ipv4, verify_checksum=True)
+		self.assertTrue(tcp2.checksum_valid)
+		self.assertEqual(tcp2.payload, b"hello world")
+		self.assertEqual(tcp2.seq_num, 100)
+		self.assertEqual(tcp2.ack_num, 200)
+
+	def test_fin_encode_decode(self):
+		ipv4 = IPv4Packet()
+		ipv4.src_addr = 0x0A000001
+		ipv4.dst_addr = 0x0A000002
+
+		tcp = TCPPacket(
+			src_port = 12345, dst_port = 80,
+			flags = TCPFlags.FG_FIN | TCPFlags.FG_ACK,
+			seq_num = 300, ack_num = 400, window = 65535,
+		)
+		ipv4.payload = tcp
+		raw = ipv4.encode_packet()
+		tcp_raw = raw[20:]
+
+		tcp2 = TCPPacket()
+		tcp2.decode_packet_ipv4(tcp_raw, ipv4, verify_checksum=True)
+		self.assertTrue(tcp2.checksum_valid)
+		self.assertTrue(tcp2.flags & TCPFlags.FG_FIN)
+		self.assertTrue(tcp2.flags & TCPFlags.FG_ACK)
+
+
 UNIT_CLASSES = [
 	UnitBitwiseCodecs,
 	UnitOptionsCodecs,
@@ -784,4 +956,7 @@ UNIT_CLASSES = [
 	UnitRstHandling,
 	UnitTimers,
 	UnitListener,
+	UnitEvents,
+	UnitRetransmit,
+	UnitTCPPacketEncodeDecode,
 ]

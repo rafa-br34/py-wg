@@ -20,6 +20,15 @@ jobs:
       - run: |
           python3 -m pip install --upgrade pip
           pip install -r requirements.txt || true
+          pip install coverage
 
-      - name: Run test suite
-        run: PYTHONPATH=tests/ python3 -m unittest discover
+      - name: Run test suite with coverage
+        run: |
+          python3 -m coverage run --source=src run_tests.py
+          python3 -m coverage xml
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false

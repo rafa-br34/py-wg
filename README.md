@@ -1,6 +1,7 @@
 # Python WireGuard
 
 [![Tests](https://github.com/rafa-br34/py-wg/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/rafa-br34/py-wg/actions/workflows/tests.yml)
+[![Coverage](https://codecov.io/gh/rafa-br34/py-wg/branch/main/graph/badge.svg)](https://codecov.io/gh/rafa-br34/py-wg)
 [![PyPI](https://img.shields.io/pypi/v/wireguard-protocol?color=blue&label=PyPI)](https://pypi.org/project/wireguard-protocol/)
 [![Downloads](https://img.shields.io/pypi/dm/wireguard-protocol)](https://pypi.org/project/wireguard-protocol/)
 
@@ -61,11 +62,14 @@ To run tests simply run
 python run_tests.py
 ```
 
-For the test coverage report run (this needs `pytest` to be installed)
+For the test coverage report run (this needs `coverage` to be installed)
 
 ```bash
-PYTHONPATH=tests/ python -m pytest --cov=./src/ --cov-report=term-missing tests
+python -m coverage run --source=src run_tests.py
+python -m coverage report -m
 ```
+
+For a one-line alternative to quickly get the overall coverage you can use `PYTHONPATH=tests/ python -m pytest --cov=./src/ --cov-report=term-missing tests`
 
 ## Testing and troubleshooting
 

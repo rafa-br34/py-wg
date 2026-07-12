@@ -995,6 +995,9 @@ class TCPConnection:
 		data = bytes(self.recv_buffer[:max_bytes])
 		self.recv_buffer = self.recv_buffer[len(data):]
 
+		if data:
+			self._events.fire_handler("data_received", (data,))
+
 		free = self.recv_buff_max - len(self.recv_buffer)
 		if free >= min(self.recv_buff_max // 2, self.effective_send_mss):
 			self.recv_wnd = free

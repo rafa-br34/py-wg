@@ -139,6 +139,7 @@ class TCPPacket:
 		checksum_state.update(hdr_params)
 		checksum_state.update(hdr_urg_ptr)
 		checksum_state.update(hdr_options)
+		checksum_state.update(payload)
 
 		checksum = checksum_state.finalize()
 

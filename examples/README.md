@@ -60,13 +60,14 @@ To get the servers simply open [api.mullvad.net/www/relays/all](https://api.mull
 
 Every example has a comment at the top of what it should output when successfully ran.
 
-- `icmp-round-trip.py`: Demonstrates how to perform an ICMP ping over WireGuard.
-- `udp-round-trip.py`: Demonstrates how to connect a WireGuard peer and send UDP packets to DNS servers using `dnslib`.
-- `syn-scan.py`: Demonstrates how to perform a SYN scan over WireGuard.
-- `scapy-icmp6.py`: Demonstrates how to send ICMPv6 packets over WireGuard using `scapy` for encoding.
+- `icmp-round-trip.py`: ICMP ping over WireGuard using the raw `Initiator` with a manual socket loop.
+- `icmp-round-trip-async-api.py`: Same ICMP ping, but using the high-level `AsyncInitiator` with `start()` / `tx_packet()` / `rx_packet()` and event hooks.
+- `udp-dns-round-trip.py`: UDP DNS queries over WireGuard using `dnslib` and the raw `Initiator`.
+- `syn-scan.py`: TCP SYN port scan over WireGuard using the raw `Initiator`.
+- `scapy-icmp6.py`: ICMPv6 ping over WireGuard using `scapy` for packet encoding.
+- `tcp-http-async.py`: Full TCP handshake + HTTP GET over WireGuard using `AsyncInitiator` and the built-in `TCPConnection` FSM. Demonstrates WG handshake, TCP state machine (`event_open` / `event_send` / `event_receive`), and event hooks (`on_state_change`, `on_data_received`, etc.).
 
 In the future more examples will be added to demonstrate different use cases of the library, such as:
 
 - Creating a WireGuard server.
-- Establishing a 2-way TCP connection over WireGuard.
-- Performing a full HTTP(S) request over WireGuard utilizing `requests`.
+- Performing a full HTTP(S) request over WireGuard utilizing `requests` + a custom socket adapter.

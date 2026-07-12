@@ -4,9 +4,10 @@ import random
 import struct
 import time
 
-from typing import Optional
+from typing import Optional, Callable
 from enum import IntEnum
 
+from ...events import Events
 from ..ipv4 import IPv4Packet
 from .tcp_pkt import TCPPacket, TCPFlags, TCP_MAX_MSS_V4, TCP_MAX_MSS_V6
 from .tcp_opt import TCPOption, TCPOptionKind
@@ -102,6 +103,7 @@ class TCPConnection:
 		self._ack_immediate = False
 
 		self._timers = TCPTimers(self._on_timer)
+		self._events = Events()
 
 		self._send_buffer = bytearray()
 		self._nagle_enabled = True
@@ -136,7 +138,34 @@ class TCPConnection:
 		self.dst_retransmit.append(packet)
 
 	def _advance_state(self, state: TCPState):
+		old = self.state
 		self.state = state
+		self._events.fire_handler("state_change", (old, state))
+
+		if state == TCPState.STATE_ESTABLISHED:
+			self._events.fire_handler("connection_established")
+		elif state in (TCPState.STATE_CLOSED, TCPState.STATE_TIME_WAIT):
+			self._events.fire_handler("connection_closed")
+
+	# --- Event registration ---
+
+	def on_state_change(self, func: "Callable[[TCPState, TCPState], None]"):
+		self._events.attach_handler("state_change", func)
+
+	def on_connection_established(self, func: Callable[[], None]):
+		self._events.attach_handler("connection_established", func)
+
+	def on_connection_closed(self, func: Callable[[], None]):
+		self._events.attach_handler("connection_closed", func)
+
+	def on_data_received(self, func: Callable[[bytes], None]):
+		self._events.attach_handler("data_received", func)
+
+	def on_data_sent(self, func: Callable[[bytes], None]):
+		self._events.attach_handler("data_sent", func)
+
+	def on_retransmit(self, func: Callable[[], None]):
+		self._events.attach_handler("retransmit", func)
 
 	# --- Error helpers ---
 
@@ -756,6 +785,10 @@ class TCPConnection:
 		packet.opt_set(TCPOptionKind.OPT_MSS, mss = conn_mss)
 
 		self._enqueue_outbound(packet)
+		# Track SYN in _in_flight so RTO can retransmit it
+		self._in_flight.append((isn, 0, b"", time_ms(), 0, TCPFlags.FG_SYN))
+		if not self._timer_active("RTO"):
+			self._schedule_timer("RTO", self._rto)
 		self._advance_state(TCPState.STATE_SYN_SENT)
 
 	# RFC 9293 @ 3.10.2
@@ -815,7 +848,9 @@ class TCPConnection:
 		)
 
 		send_time_ms = time_ms()
-		self._in_flight.append((seq, len(data), data, send_time_ms, 0))
+		self._in_flight.append((seq, len(data), data, send_time_ms, 0, TCPFlags.FG_ACK))
+
+		self._events.fire_handler("data_sent", (data, ))
 
 		if not self._timer_active("RTO"):
 			self._schedule_timer("RTO", self._rto)
@@ -848,7 +883,7 @@ class TCPConnection:
 		return min(4 * mss, max(2 * mss, 4380))
 
 	def _bytes_in_flight(self) -> int:
-		return sum(length for _, length, _, _, _ in self._in_flight)
+		return sum(length for _, length, _, _, _, _ in self._in_flight)
 
 	def _update_rtt(self, rtt_sample: int):
 		if self._srtt is None:
@@ -872,7 +907,7 @@ class TCPConnection:
 
 	def _clean_in_flight(self, ack_num: int):
 		while self._in_flight:
-			seq, length, _, send_time, retrans_count = self._in_flight[0]
+			seq, length, _, send_time, retrans_count, _ = self._in_flight[0]
 			seg_end = (seq + length) & 0xFFFFFFFF
 
 			if not self._seq_leq(seg_end, ack_num):
@@ -888,7 +923,7 @@ class TCPConnection:
 		if not self._in_flight:
 			return
 
-		seq, length, data, _, retrans_count = self._in_flight[0]
+		seq, length, data, _, retrans_count, flags = self._in_flight[0]
 
 		self._rto = min(self._rto * 2, 120000)
 		self._ssthresh = max(self._cwnd // 2, 2 * self.effective_send_mss)
@@ -898,7 +933,7 @@ class TCPConnection:
 		self._cancel_timer("DELAYED_ACK")
 		self._enqueue_outbound(
 			TCPPacket(
-				flags = TCPFlags.FG_ACK,
+				flags = flags,
 				seq_num = seq,
 				ack_num = self.recv_nxt,
 				window = self.recv_wnd,
@@ -906,15 +941,17 @@ class TCPConnection:
 			)
 		)
 
+		self._events.fire_handler("retransmit")
+
 		send_time_ms = time_ms()
-		self._in_flight[0] = (seq, length, data, send_time_ms, retrans_count + 1)
+		self._in_flight[0] = (seq, length, data, send_time_ms, retrans_count + 1, flags)
 		self._schedule_timer("RTO", self._rto)
 
 	def _fast_retransmit(self):
 		if not self._in_flight:
 			return
 
-		seq, length, data, _, retrans_count = self._in_flight[0]
+		seq, length, data, _, retrans_count, flags = self._in_flight[0]
 
 		self._ssthresh = max(self._cwnd // 2, 2 * self.effective_send_mss)
 		self._cwnd = self._ssthresh + 3 * self.effective_send_mss
@@ -922,7 +959,7 @@ class TCPConnection:
 		self._cancel_timer("DELAYED_ACK")
 		self._enqueue_outbound(
 			TCPPacket(
-				flags = TCPFlags.FG_ACK,
+				flags = flags,
 				seq_num = seq,
 				ack_num = self.recv_nxt,
 				window = self.recv_wnd,
@@ -930,8 +967,10 @@ class TCPConnection:
 			)
 		)
 
+		self._events.fire_handler("retransmit")
+
 		send_time_ms = time_ms()
-		self._in_flight[0] = (seq, length, data, send_time_ms, retrans_count + 1)
+		self._in_flight[0] = (seq, length, data, send_time_ms, retrans_count + 1, flags)
 
 	def _zero_window_probe(self):
 		if not self._send_buffer:

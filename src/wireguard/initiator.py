@@ -300,6 +300,10 @@ class Initiator:
 				self._stage_handshake_req()
 
 		if not self.state_connected:
+			# Auto-trigger the initial handshake if no handshake is in progress
+			if self.state_reconnect_begin is None and self.state_rekey_begin is None:
+				self.state_reconnect_begin = curr_time
+				self.state_reconnect_timer = curr_time - STATE_REKEY_TIMEOUT
 			return
 
 		# 6.5 send keepalive when we have received data but haven't sent recently

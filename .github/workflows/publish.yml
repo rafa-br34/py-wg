@@ -1,0 +1,74 @@
+name: Publish to PyPI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "pyproject.toml"
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.version.outputs.published }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get new version
+        id: version
+        run: |
+          NEW_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          # Compare with the previous commit's pyproject.toml
+          git show HEAD~1:pyproject.toml > /tmp/old.toml 2>/dev/null || true
+          if [ -f /tmp/old.toml ]; then
+            OLD_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('/tmp/old.toml','rb'))['project']['version'])")
+            if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
+              echo "published=true" >> $GITHUB_OUTPUT
+              echo "Version bumped: $OLD_VERSION -> $NEW_VERSION"
+            else
+              echo "published=false" >> $GITHUB_OUTPUT
+              echo "Version unchanged: $NEW_VERSION"
+            fi
+          else
+            echo "published=true" >> $GITHUB_OUTPUT
+            echo "First version: $NEW_VERSION"
+          fi
+
+  build-and-publish:
+    needs: check-version
+    if: needs.check-version.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # required for trusted publishing
+      contents: write # required for GitHub release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build package
+        run: python3 -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: v${{ needs.check-version.outputs.version }}
+          generate_release_notes: true
+          files: dist/*

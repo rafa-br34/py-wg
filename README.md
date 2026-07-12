@@ -17,6 +17,7 @@ A pure python implementation of the WireGuard protocol.
   - [Usage](#usage)
   - [Development](#development)
     - [Running tests \& test coverage](#running-tests--test-coverage)
+    - [Formatting the codebase](#formatting-the-codebase)
   - [Testing and troubleshooting](#testing-and-troubleshooting)
   - [References](#references)
 
@@ -70,6 +71,15 @@ python -m coverage report -m
 ```
 
 For a one-line alternative to quickly get the overall coverage you can use `PYTHONPATH=tests/ python -m pytest --cov=./src/ --cov-report=term-missing tests`
+
+### Formatting the codebase
+
+To format the codebase you can run
+
+```bash
+yapf src --recursive -i -m
+yapf examples --recursive -i -m
+```
 
 ## Testing and troubleshooting
 

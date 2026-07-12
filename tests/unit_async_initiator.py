@@ -4,7 +4,7 @@ import asyncio
 
 from nacl.public import PrivateKey as NaClPrivateKey
 
-from src.wireguard import Initiator, AsyncInitiator, Handshake, KeyPair
+from src.wireguard import Initiator, AsyncInitiator, Handshake
 from src.wireguard.constants import (
 	STATE_KEEPALIVE_TIMEOUT,
 	STATE_REKEY_TIMEOUT,
@@ -316,7 +316,7 @@ class UnitAsyncInitiator(unittest.TestCase):
 	def test_rx_queue_push_pop(self):
 		msg = b"decoded-message"
 
-		self.peer._rx_queue.put_nowait(msg)
+		self.peer._rx_queue_threadsafe.put_nowait(msg)
 
 		self.assertEqual(self.peer.rx_packet_nowait(), msg)
 		self.assertIsNone(self.peer.rx_packet_nowait())
@@ -416,7 +416,7 @@ class UnitAsyncInitiatorIntegration(unittest.IsolatedAsyncioTestCase):
 		self.assertTrue(peer.state_connected)
 
 		# Should return True instantly without needing start()
-		result = await peer.wait_handshake_completion(timeout=0.1)
+		result = await peer.wait_handshake_completion(timeout = 0.1)
 		self.assertTrue(result)
 
 	async def test_wait_handshake_completion_timeout(self):
@@ -427,7 +427,7 @@ class UnitAsyncInitiatorIntegration(unittest.IsolatedAsyncioTestCase):
 
 		self.assertFalse(peer.state_connected)
 
-		result = await peer.wait_handshake_completion(timeout=0.1)
+		result = await peer.wait_handshake_completion(timeout = 0.1)
 		self.assertFalse(result)
 
 

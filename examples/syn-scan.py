@@ -12,11 +12,10 @@ Done waiting
 
 import random
 import socket
-import base64
 import time
 import copy
 
-from src.wireguard import Initiator, PrivateKey, PublicKey
+from src.wireguard import Initiator
 from src.wireguard.functions import wg_pad
 from src.wireguard.stack.internet import Protocols, internet_protocol_to_str, ip_packet_val
 from src.wireguard.stack.ipv4 import IPv4Packet
@@ -75,7 +74,7 @@ SCAN_TARGETS = [
 SCAN_RATE = 1024
 SCAN_WAIT = 20
 
-peer = Initiator(PrivateKey(base64.b64decode(client_key)), PublicKey(base64.b64decode(server_key)))
+peer = Initiator(client_key, server_key)
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setblocking(False)

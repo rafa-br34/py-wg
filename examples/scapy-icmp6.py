@@ -18,7 +18,6 @@ Ping 5
 
 import random
 import socket
-import base64
 import time
 
 from src.wireguard.initiator import Initiator
@@ -42,7 +41,7 @@ ICMP_MESSAGE_LEN = 32
 ICMP_TIMEOUT = 5
 ICMP_SERVER = "2606:4700:4700::1111"
 
-peer = Initiator(base64.b64decode(client_key), base64.b64decode(server_key))
+peer = Initiator(client_key, server_key)
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setblocking(False)

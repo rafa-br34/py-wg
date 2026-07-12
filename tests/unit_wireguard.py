@@ -4,6 +4,7 @@ from src.wireguard.constants import TEMPLATE_EMPTY_MAC, STATE_COOKIE_LIFETIME, L
 from src.wireguard.exceptions import WireguardHandshakeException
 from src.wireguard.functions import wg_pad
 from src.wireguard.packet_replay import PacketReplay
+from src.wireguard import tai64n
 
 import unittest
 import random
@@ -25,10 +26,14 @@ def check_derivation(unit: unittest.TestCase, src_handshake: wg.Handshake, dst_h
 	dst_handshake.derive_keypair(dst_keypair)
 
 	unit.assertEqual(
-		src_keypair.send_key, dst_keypair.recv_key, "Key derivation failed src_keypair.send_key != dst_keypair.recv_key"
+		src_keypair.send_key,
+		dst_keypair.recv_key,
+		"Key derivation failed src_keypair.send_key != dst_keypair.recv_key",
 	)
 	unit.assertEqual(
-		dst_keypair.send_key, src_keypair.recv_key, "Key derivation failed dst_keypair.send_key != src_keypair.recv_key"
+		dst_keypair.send_key,
+		src_keypair.recv_key,
+		"Key derivation failed dst_keypair.send_key != src_keypair.recv_key",
 	)
 
 
@@ -157,7 +162,7 @@ class UnitTimedLogic(unittest.TestCase):
 				"Initiator was expected to ditch MAC 2 after cookie expiration.",
 			)
 
-			try:
+			try: # NOSONAR (S8714) No other way to get this exact functionality
 				# (Initiator) Handshake request -> (Responder)
 				encoded_req = src_handshake.encode_handshake_req()
 				dst_handshake.decode_handshake_req(encoded_req)
@@ -239,9 +244,50 @@ class UnitPadding(unittest.TestCase):
 		self.assertEqual(result[1:], b"\x00" * 15)
 
 
+class UnitTAI64N(unittest.TestCase):
+	def test_encode_decode_roundtrip(self):
+		now = time.time()
+		encoded = tai64n.encode_tai64n(now)
+		decoded = tai64n.decode_tai64n(encoded)
+		self.assertAlmostEqual(now, decoded, places = 4)
+
+	def test_encode_decode_zero(self):
+		encoded = tai64n.encode_tai64n(0.0)
+		decoded = tai64n.decode_tai64n(encoded)
+		self.assertAlmostEqual(0.0, decoded, places = 4)
+
+	def test_encode_decode_negative(self):
+		now = -(2 ** 30) + 0.5
+		encoded = tai64n.encode_tai64n(now)
+		decoded = tai64n.decode_tai64n(encoded)
+		self.assertAlmostEqual(now, decoded, places = 4)
+
+	def test_decode_invalid_length(self):
+		with self.assertRaises(AssertionError):
+			tai64n.decode_tai64n(b"\x00" * 11)
+
+	def test_encode_length(self):
+		self.assertEqual(len(tai64n.encode_tai64n(0.0)), 12)
+		self.assertEqual(len(tai64n.encode_tai64n(time.time())), 12)
+
+	def test_current_tai64n_no_precision(self):
+		result = tai64n.current_tai64n()
+		self.assertEqual(len(result), 12)
+
+	def test_current_tai64n_with_precision(self):
+		result = tai64n.current_tai64n(precision = 2)
+		self.assertEqual(len(result), 12)
+
+		now = time.time()
+		truncated = int(100 * now) / 100
+		encoded = tai64n.encode_tai64n(truncated)
+		self.assertEqual(result, encoded)
+
+
 UNIT_CLASSES = [
 	UnitHandshake,
 	UnitTimedLogic,
 	UnitPacketReplay,
 	UnitPadding,
+	UnitTAI64N,
 ]

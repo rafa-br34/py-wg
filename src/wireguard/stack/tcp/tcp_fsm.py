@@ -31,6 +31,8 @@ def initial_sequence_number(src_addr, src_port, dst_addr, dst_port):
 		dst_port,
 		TCP_ISN_SALT_1,
 	)
+
+	# MD5 is outdated asf but it's what the standard recommends
 	hashed = hashlib.md5(packed).digest()
 
 	# 4µs~ per tick
@@ -996,7 +998,7 @@ class TCPConnection:
 		self.recv_buffer = self.recv_buffer[len(data):]
 
 		if data:
-			self._events.fire_handler("data_received", (data,))
+			self._events.fire_handler("data_received", (data, ))
 
 		free = self.recv_buff_max - len(self.recv_buffer)
 		if free >= min(self.recv_buff_max // 2, self.effective_send_mss):

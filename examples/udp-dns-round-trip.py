@@ -28,10 +28,9 @@ www.google.com.         289     IN      A       142.250.70.228
 
 import random
 import socket
-import base64
 import time
 
-from src.wireguard import Initiator, PrivateKey, PublicKey
+from src.wireguard import Initiator
 from src.wireguard.functions import wg_pad
 from src.wireguard.stack.internet import Protocols, internet_protocol_to_str, ip_packet_val
 from src.wireguard.stack.ipv4 import IPv4Packet
@@ -53,7 +52,7 @@ DNS_SERVER = "1.1.1.1"
 DNS_QUERY = "www.google.com"
 DNS_PORT = 53
 
-peer = Initiator(PrivateKey(base64.b64decode(client_key)), PublicKey(base64.b64decode(server_key)))
+peer = Initiator(client_key, server_key)
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setblocking(False)

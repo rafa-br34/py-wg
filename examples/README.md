@@ -66,8 +66,8 @@ Every example has a comment at the top of what it should output when successfull
 - `syn-scan.py`: TCP SYN port scan over WireGuard using the raw `Initiator`.
 - `scapy-icmp6.py`: ICMPv6 ping over WireGuard using `scapy` for packet encoding.
 - `tcp-http-async.py`: Full TCP handshake + HTTP GET over WireGuard using `AsyncInitiator` and the built-in `TCPConnection` FSM. Demonstrates WG handshake, TCP state machine (`event_open` / `event_send` / `event_receive`), and event hooks (`on_state_change`, `on_data_received`, etc.).
+- `requests-adapter.py`: Performing an HTTP and HTTPS request using `requests` and a custom socket adapter.
 
 In the future more examples will be added to demonstrate different use cases of the library, such as:
 
 - Creating a WireGuard server.
-- Performing a full HTTP(S) request over WireGuard utilizing `requests` + a custom socket adapter.

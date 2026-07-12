@@ -32,7 +32,7 @@ from .constants import (
 	STATE_REKEY_ATTEMPT_TIME,
 	STATE_REKEY_TIMEOUT,
 	STATE_KEEPALIVE_TIMEOUT,
-	STATE_COOKIE_LIFETIME,
+	# STATE_COOKIE_LIFETIME,
 )
 from .handshake import Handshake
 from .keypair import KeyPair
@@ -259,12 +259,14 @@ class Initiator:
 		curr_time = time.monotonic()
 
 		rekey_msgs = curr_keypair.send_count > STATE_REKEY_AFTER_MSGS
+
+		is_connected = self.state_connected and self.handshake.initiator
+		keypair_age = curr_time - curr_keypair.lifetime
+
 		# 6.2 time-based rekey restricted to initiator of current session
-		rekey_time_send = (self.state_connected and self.handshake.initiator and curr_time - curr_keypair.lifetime > STATE_REKEY_AFTER_TIME)
-		rekey_time_recv = (
-			self.state_connected and self.handshake.initiator and curr_keypair.recv_last > 0
-			and curr_time - curr_keypair.lifetime > STATE_REJECT_AFTER_TIME_RX
-		)
+		rekey_time_send = (is_connected and keypair_age > STATE_REKEY_AFTER_TIME)
+		rekey_time_recv = (is_connected and keypair_age > STATE_REJECT_AFTER_TIME_RX and curr_keypair.recv_last > 0)
+
 		if (rekey_time_send or rekey_msgs or rekey_time_recv) and self.state_rekey_begin is None:
 			self.state_rekey_begin = time.monotonic()
 
@@ -304,6 +306,7 @@ class Initiator:
 			if self.state_reconnect_begin is None and self.state_rekey_begin is None:
 				self.state_reconnect_begin = curr_time
 				self.state_reconnect_timer = curr_time - STATE_REKEY_TIMEOUT
+
 			return
 
 		# 6.5 send keepalive when we have received data but haven't sent recently

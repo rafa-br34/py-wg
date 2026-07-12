@@ -9,7 +9,7 @@ import time
 import sys
 
 sys.path.insert(0, "..")
-from src.wireguard import AsyncInitiator, PrivateKey, PublicKey
+from src.wireguard import AsyncInitiator
 from src.wireguard.constants import MessageTypes
 from src.wireguard.functions import wg_pad
 from src.wireguard.initiator import wg_ident_header

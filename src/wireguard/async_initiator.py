@@ -1,4 +1,5 @@
 import asyncio
+import queue
 import time
 
 from typing import Optional
@@ -51,6 +52,7 @@ class AsyncInitiator(Initiator):
 		super().__init__(initiator_pri, responder_pub, preshared_key)
 
 		self._rx_queue: asyncio.Queue = asyncio.Queue(maxsize = rx_queue_size)
+		self._rx_queue_threadsafe: queue.Queue = queue.Queue(maxsize = rx_queue_size)
 		self._tx_queue_size = tx_queue_size
 
 		self._transport = None
@@ -82,6 +84,10 @@ class AsyncInitiator(Initiator):
 					self._rx_queue.put_nowait(decoded)
 				except asyncio.QueueFull:
 					pass # drop if consumer is too slow
+				try:
+					self._rx_queue_threadsafe.put_nowait(decoded)
+				except queue.Full:
+					pass
 
 		self._transport, self._protocol = await loop.create_datagram_endpoint(
 			lambda: _WGProtocol(on_datagram),
@@ -134,10 +140,13 @@ class AsyncInitiator(Initiator):
 			return None
 
 	def rx_packet_nowait(self) -> Optional[bytes]:
-		"""Return a decoded message if one is available, otherwise ``None``."""
+		"""Return a decoded message if one is available, otherwise ``None``.
+
+		Thread-safe — may be called from outside the asyncio event loop.
+		"""
 		try:
-			return self._rx_queue.get_nowait()
-		except asyncio.QueueEmpty:
+			return self._rx_queue_threadsafe.get_nowait()
+		except queue.Empty:
 			return None
 
 	def tx_packet(self, data: bytes):
@@ -180,6 +189,7 @@ class AsyncInitiator(Initiator):
 			event.set()
 
 		self.on_handshake_complete(_on_complete)
+
 		try:
 			await asyncio.wait_for(event.wait(), timeout = timeout)
 			return True

@@ -776,7 +776,6 @@ class UnitListener(unittest.TestCase):
 
 class UnitEvents(unittest.TestCase):
 	"""TCPConnection event hooks."""
-
 	def setUp(self):
 		self.conn = TCPConnection()
 
@@ -818,9 +817,13 @@ class UnitEvents(unittest.TestCase):
 		self._handshake(self.conn)
 		self.conn._recv_packet(
 			TCPPacket(
-				src_port = 80, dst_port = 12345,
-				flags = TCPFlags.FG_ACK, seq_num = 5001,
-				ack_num = self.conn.send_una, payload = b"world", window = 65535,
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_ACK,
+				seq_num = 5001,
+				ack_num = self.conn.send_una,
+				payload = b"world",
+				window = 65535,
 			)
 		)
 		data = self.conn.event_receive(100)
@@ -839,16 +842,18 @@ class UnitEvents(unittest.TestCase):
 	def _handshake(self, conn):
 		conn._recv_packet(
 			TCPPacket(
-				src_port = conn.dst_port, dst_port = conn.src_port,
+				src_port = conn.dst_port,
+				dst_port = conn.src_port,
 				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
-				seq_num = 5000, ack_num = conn.send_isn + 1, window = 65535,
+				seq_num = 5000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
 			)
 		)
 
 
 class UnitRetransmit(unittest.TestCase):
 	"""SYN retransmit: verify the SYN is re-enqueued with FG_SYN on RTO."""
-
 	def test_syn_retransmit_preserves_flags(self):
 		conn = TCPConnection()
 		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
@@ -880,23 +885,25 @@ class UnitRetransmit(unittest.TestCase):
 
 class UnitTCPPacketEncodeDecode(unittest.TestCase):
 	"""Round-trip encode/decode for tcp_pkt."""
-
 	def test_syn_encode_decode(self):
 		ipv4 = IPv4Packet()
 		ipv4.src_addr = 0x0A000001
 		ipv4.dst_addr = 0x0A000002
 
 		tcp = TCPPacket(
-			src_port = 12345, dst_port = 80,
-			flags = TCPFlags.FG_SYN, seq_num = 0x12345678,
-			ack_num = 0, window = 65535,
+			src_port = 12345,
+			dst_port = 80,
+			flags = TCPFlags.FG_SYN,
+			seq_num = 0x12345678,
+			ack_num = 0,
+			window = 65535,
 		)
 		ipv4.payload = tcp
 		raw = ipv4.encode_packet()
-		tcp_raw = raw[20:]  # skip IPv4 header
+		tcp_raw = raw[20:] # skip IPv4 header
 
 		tcp2 = TCPPacket()
-		tcp2.decode_packet_ipv4(tcp_raw, ipv4, verify_checksum=True)
+		tcp2.decode_packet_ipv4(tcp_raw, ipv4, verify_checksum = True)
 		self.assertTrue(tcp2.checksum_valid)
 		self.assertEqual(tcp2.src_port, 12345)
 		self.assertEqual(tcp2.dst_port, 80)
@@ -908,9 +915,12 @@ class UnitTCPPacketEncodeDecode(unittest.TestCase):
 		ipv4.dst_addr = 0x0A000002
 
 		tcp = TCPPacket(
-			src_port = 12345, dst_port = 80,
+			src_port = 12345,
+			dst_port = 80,
 			flags = TCPFlags.FG_ACK | TCPFlags.FG_PSH,
-			seq_num = 100, ack_num = 200, window = 65535,
+			seq_num = 100,
+			ack_num = 200,
+			window = 65535,
 			payload = b"hello world",
 		)
 		ipv4.payload = tcp
@@ -918,7 +928,7 @@ class UnitTCPPacketEncodeDecode(unittest.TestCase):
 		tcp_raw = raw[20:]
 
 		tcp2 = TCPPacket()
-		tcp2.decode_packet_ipv4(tcp_raw, ipv4, verify_checksum=True)
+		tcp2.decode_packet_ipv4(tcp_raw, ipv4, verify_checksum = True)
 		self.assertTrue(tcp2.checksum_valid)
 		self.assertEqual(tcp2.payload, b"hello world")
 		self.assertEqual(tcp2.seq_num, 100)
@@ -930,16 +940,19 @@ class UnitTCPPacketEncodeDecode(unittest.TestCase):
 		ipv4.dst_addr = 0x0A000002
 
 		tcp = TCPPacket(
-			src_port = 12345, dst_port = 80,
+			src_port = 12345,
+			dst_port = 80,
 			flags = TCPFlags.FG_FIN | TCPFlags.FG_ACK,
-			seq_num = 300, ack_num = 400, window = 65535,
+			seq_num = 300,
+			ack_num = 400,
+			window = 65535,
 		)
 		ipv4.payload = tcp
 		raw = ipv4.encode_packet()
 		tcp_raw = raw[20:]
 
 		tcp2 = TCPPacket()
-		tcp2.decode_packet_ipv4(tcp_raw, ipv4, verify_checksum=True)
+		tcp2.decode_packet_ipv4(tcp_raw, ipv4, verify_checksum = True)
 		self.assertTrue(tcp2.checksum_valid)
 		self.assertTrue(tcp2.flags & TCPFlags.FG_FIN)
 		self.assertTrue(tcp2.flags & TCPFlags.FG_ACK)

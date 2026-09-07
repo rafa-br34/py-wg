@@ -1,6 +1,12 @@
 import src.wireguard as wg
 
-from src.wireguard.constants import TEMPLATE_EMPTY_MAC, STATE_COOKIE_LIFETIME, LEN_MACS
+from src.wireguard.constants import (
+	TEMPLATE_EMPTY_MAC,
+	STATE_COOKIE_LIFETIME,
+	LEN_MACS,
+	LEN_HANDSHAKE_REQ_TOTAL,
+	LEN_HANDSHAKE_RES_TOTAL,
+)
 from src.wireguard.exceptions import WireguardHandshakeException
 from src.wireguard.functions import wg_pad
 from src.wireguard.packet_replay import PacketReplay
@@ -92,6 +98,65 @@ class UnitHandshake(unittest.TestCase):
 
 		with self.assertRaises(WireguardHandshakeException):
 			dst_handshake.decode_handshake_req(encoded_req)
+
+	def test_rejected_replay_commits_no_state(self):
+		"""5.1: a rejected replayed initiation must not leave handshake state behind."""
+		src_handshake = self.src_handshake
+		dst_handshake = self.dst_handshake
+
+		encoded_req = src_handshake.encode_handshake_req()
+		dst_handshake.decode_handshake_req(encoded_req)
+
+		chaining_key = dst_handshake.chaining_key
+		handshake_hash = dst_handshake.handshake_hash
+		dst_ident = dst_handshake.dst_ident
+		dst_ephemeral = dst_handshake.dst_ephemeral.encode()
+
+		with self.assertRaises(WireguardHandshakeException):
+			dst_handshake.decode_handshake_req(encoded_req)
+
+		self.assertEqual(dst_handshake.chaining_key, chaining_key)
+		self.assertEqual(dst_handshake.handshake_hash, handshake_hash)
+		self.assertEqual(dst_handshake.dst_ident, dst_ident)
+		self.assertEqual(dst_handshake.dst_ephemeral.encode(), dst_ephemeral)
+
+	def test_rapid_reinitiation_timestamps_strictly_increase(self):
+		"""5.1: back-to-back initiations must not be rejected as timestamp replays."""
+		src_handshake = self.src_handshake
+		dst_handshake = self.dst_handshake
+
+		real_time = time.time
+		time.time = lambda: 1000000000.0 # frozen clock: a naive implementation repeats its timestamp
+		try:
+			for _ in range(3):
+				packet = src_handshake.encode_handshake_req()
+				dst_handshake.decode_handshake_req(packet)
+		finally:
+			time.time = real_time
+
+	def test_bad_mac1_rejected(self):
+		"""5.4.4: an invalid MAC 1 is rejected before any crypto is performed."""
+		encoded_req = self.src_handshake.encode_handshake_req()
+
+		bad_req = bytearray(encoded_req)
+		bad_req[-LEN_MACS] ^= 0xFF # flip a byte of MAC 1 (the first of the two MACs)
+
+		with self.assertRaises(WireguardHandshakeException):
+			self.dst_handshake.decode_handshake_req(bytes(bad_req))
+
+	def test_malformed_lengths_rejected(self):
+		"""5.4.2/5.4.3: fixed-size messages with wrong lengths raise cleanly."""
+		encoded_req = self.src_handshake.encode_handshake_req()
+
+		with self.assertRaises(WireguardHandshakeException):
+			self.dst_handshake.decode_handshake_req(encoded_req[:-5])
+
+		# A full handshake exchange followed by a truncated response
+		self.dst_handshake.decode_handshake_req(encoded_req)
+		encoded_res = self.dst_handshake.encode_handshake_res()
+
+		with self.assertRaises(WireguardHandshakeException):
+			self.src_handshake.decode_handshake_res(encoded_res[:-5])
 
 	def test_key_derivation_cookie(self):
 		src_handshake = self.src_handshake

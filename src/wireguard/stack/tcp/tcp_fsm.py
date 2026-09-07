@@ -110,6 +110,10 @@ class TCPConnection:
 		self._send_buffer = bytearray()
 		self._nagle_enabled = True
 
+		self._close_pending = False # CLOSE requested while send data is still queued (RFC 9293 @ 3.10.4)
+		self._recv_fin_seq: Optional[int] = None # Absolute FIN seq received out-of-order (RFC 9293 @ 3.10.7.4)
+		self._peer_fin_received = False # The peer's FIN has been consumed
+
 		self._in_flight = []
 		self._srtt = None
 		self._rttvar = None
@@ -119,13 +123,20 @@ class TCPConnection:
 		self._dup_ack_count = 0
 		self._last_ack = 0
 
+		# RFC 9293 @ 3.8.3 (R2): abort once a segment has been retransmitted this
+		# many times (None disables the abort). Default 9 retransmissions exceeds
+		# the ~100 s SHOULD (SHLD-11) and the 3-minute SYN minimum (MUST-23).
+		self.max_retransmissions: Optional[int] = 9
+
 		self.dst_retransmit = collections.deque()
 		self.dst_staged_buffer = collections.deque()
-		self.dst_staged_index = 0
 		self.dst_addr = 0
 		self.dst_port = 0
 		self.dst_mss = 0
 
+		# Window scaling is never enabled: we do not advertise the Window Scale
+		# option, so by RFC 7323 @ 2.2 peer window fields must be decoded with a
+		# shift of 0. (_send_shift is kept as the knob if WS support is added.)
 		self._send_shift = 0
 		self._recv_shift = 0
 
@@ -168,6 +179,15 @@ class TCPConnection:
 
 	def on_retransmit(self, func: Callable[[], None]):
 		self._events.attach_handler("retransmit", func)
+
+	def on_urgent_data(self, func: Callable[[int], None]):
+		# RFC 9293 @ 3.8.5 (MUST-32): async notification when urgent data arrives
+		# or the urgent pointer advances. Receives the absolute sequence number of
+		# the octet following the urgent data.
+		self._events.attach_handler("urgent_data", func)
+
+	def on_connection_failed(self, func: Callable[[], None]):
+		self._events.attach_handler("connection_failed", func)
 
 	# --- Error helpers ---
 
@@ -333,23 +353,37 @@ class TCPConnection:
 		fg_rst = packet.flags & TCPFlags.FG_RST
 		fg_ack = packet.flags & TCPFlags.FG_ACK
 
+		# Second, check the RST bit (RFC 9293 @ 3.10.7.3). An RST is only acted
+		# upon when its ACK is acceptable (SND.UNA < SEG.ACK =< SND.NXT); an RST
+		# without an ACK (or with an unacceptable ACK) is dropped silently and
+		# must never provoke a reply.
+		if fg_rst:
+			ack_acceptable = (
+				fg_ack and self._seq_lt(self.send_una, packet.ack_num) and self._seq_leq(packet.ack_num, self.send_nxt)
+			)
+
+			if ack_acceptable:
+				self._advance_state(TCPState.STATE_CLOSED)
+				self._fail_conn_reset()
+
+			return
+
+		# First, check the ACK bit (RFC 9293 @ 3.10.7.3).
 		if fg_ack:
 			if packet.ack_num <= self.send_isn or packet.ack_num > self.send_nxt:
-				if fg_rst:
-					return
 				self._enqueue_outbound(TCPPacket(flags = TCPFlags.FG_RST, seq_num = packet.ack_num))
 
 				return
 
-			if not (self.send_una < packet.ack_num and packet.ack_num <= self.send_nxt):
+			if not (self._seq_lt(self.send_una, packet.ack_num) and self._seq_leq(packet.ack_num, self.send_nxt)):
+				return
+
+			if not fg_syn:
+				# An ACK-only segment cannot complete the handshake; the peer must
+				# acknowledge our SYN with a SYN-ACK. Drop it.
 				return
 		else:
 			# Simultaneous open: SYN arrives without ACK (MUST-10)
-			opt_ws = packet.opt_get(TCPOptionKind.OPT_WINDOW)
-
-			if opt_ws is not None:
-				self._send_shift = opt_ws.window_scale
-
 			self._passive_open = False
 			self.recv_nxt = packet.seq_num + 1
 			self.recv_isn = packet.seq_num
@@ -367,61 +401,66 @@ class TCPConnection:
 			self._advance_state(TCPState.STATE_SYN_RECEIVED)
 			return
 
-		if fg_rst:
-			self._advance_state(TCPState.STATE_CLOSED)
-			self._fail_conn_reset()
+		# Fourth, check the SYN bit: reachable with an acceptable ACK only.
+		self.recv_nxt = packet.seq_num + 1
+		self.recv_isn = packet.seq_num
 
-		if fg_syn:
-			self.recv_nxt = packet.seq_num + 1
-			self.recv_isn = packet.seq_num
+		opt_mss = packet.opt_get(TCPOptionKind.OPT_MSS)
+		if opt_mss is not None:
+			self.dst_mss = opt_mss.mss
 
-			opt_mss = packet.opt_get(TCPOptionKind.OPT_MSS)
-			if opt_mss is not None:
-				self.dst_mss = opt_mss.mss
+		# The window scale option is not applied: we never offered it, so scaling
+		# was not negotiated (RFC 7323 @ 2.2) and peer windows must not be scaled.
+		self.send_una = packet.ack_num
 
-			opt_ws = packet.opt_get(TCPOptionKind.OPT_WINDOW)
-			if opt_ws is not None:
-				self._send_shift = opt_ws.window_scale
+		assert packet.window is not None
 
-		if fg_ack and packet.ack_num > self.send_una:
-			self.send_una = packet.ack_num
-
-		if self.send_una > self.send_isn:
-			assert packet.window is not None
-
-			self.recv_wnd = self.recv_buff_max - len(self.recv_buffer)
-			self.send_wnd = packet.window << self._send_shift
-			self.send_wnd_seq = packet.seq_num
-			self.send_wnd_ack = packet.ack_num
-			self._cwnd = self._initial_window()
-			self._enqueue_outbound(
-				TCPPacket(
-					flags = TCPFlags.FG_ACK,
-					seq_num = self.send_nxt,
-					ack_num = self.recv_nxt,
-					window = self.recv_wnd,
-				)
+		self.recv_wnd = self.recv_buff_max - len(self.recv_buffer)
+		self.send_wnd = packet.window << self._send_shift
+		self.send_wnd_seq = packet.seq_num
+		self.send_wnd_ack = packet.ack_num
+		self._cwnd = self._initial_window()
+		self._enqueue_outbound(
+			TCPPacket(
+				flags = TCPFlags.FG_ACK,
+				seq_num = self.send_nxt,
+				ack_num = self.recv_nxt,
+				window = self.recv_wnd,
 			)
-			self._advance_state(TCPState.STATE_ESTABLISHED)
-		else:
-			self.recv_wnd = self.recv_buff_max - len(self.recv_buffer)
-			self._enqueue_outbound(
-				TCPPacket(
-					flags = TCPFlags.FG_ACK | TCPFlags.FG_SYN,
-					seq_num = self.send_isn,
-					ack_num = self.recv_nxt,
-					window = self.recv_wnd,
-				)
-			)
-			self._advance_state(TCPState.STATE_SYN_RECEIVED)
+		)
 
-			assert packet.window is not None
+		# RFC 9293 @ 3.4: our SYN was acknowledged by this SYN-ACK, remove it
+		# from the retransmission queue and stop its RTO so an idle ESTABLISHED
+		# connection does not keep re-sending it. (No RTT sample is taken for the
+		# SYN, matching RFC 6298 handling of the initial exchange.)
+		while self._in_flight:
+			seq, length, _, _, _, flags = self._in_flight[0]
 
-			self.send_wnd = packet.window << self._send_shift
-			self.send_wnd_seq = packet.seq_num
-			self.send_wnd_ack = packet.ack_num
+			if not (flags & TCPFlags.FG_SYN):
+				break
+
+			seg_end = (seq + length) & 0xFFFFFFFF
+
+			if not self._seq_leq(seg_end, self.send_una):
+				break
+
+			self._in_flight.pop(0)
+
+		if not self._in_flight:
+			self._cancel_timer("RTO")
+
+		self._advance_state(TCPState.STATE_ESTABLISHED)
+		self._on_established()
 
 	# --- Synchronized-state pipeline (RFC 9293 @ 3.10.7.4) ---
+
+	def _on_established(self):
+		# RFC 9293 @ 3.10.2: data queued while SYN-SENT/SYN-RECEIVED is
+		# transmitted once the connection enters ESTABLISHED.
+		while self.dst_staged_buffer:
+			self._send_buffer.extend(self.dst_staged_buffer.popleft())
+
+		self._flush_send_buffer()
 
 	def _send_ack(self):
 		self._enqueue_outbound(
@@ -435,16 +474,42 @@ class TCPConnection:
 
 	def _send_fin(self):
 		self._cancel_timer("DELAYED_ACK")
+
+		seq = self.send_nxt
 		self.send_nxt = (self.send_nxt + 1) & 0xFFFFFFFF
 
 		self._enqueue_outbound(
 			TCPPacket(
 				flags = TCPFlags.FG_FIN | TCPFlags.FG_ACK,
-				seq_num = (self.send_nxt - 1) & 0xFFFFFFFF,
+				seq_num = seq,
 				ack_num = self.recv_nxt,
 				window = self.recv_wnd,
 			)
 		)
+
+		# RFC 9293 @ 3.6: all segments preceding and including the FIN are
+		# retransmitted until acknowledged, so the FIN is tracked on the
+		# retransmission queue like any other segment.
+		self._in_flight.append((seq, 1, b"", time_ms(), 0, TCPFlags.FG_FIN | TCPFlags.FG_ACK))
+
+		if not self._timer_active("RTO"):
+			self._schedule_timer("RTO", self._rto)
+
+	def _begin_close(self):
+		# RFC 9293 @ 3.10.4: the FIN is formed only once all preceding SENDs have
+		# been segmentized; queued data must not be left behind the FIN.
+		self._close_pending = True
+		self._maybe_send_close_fin()
+
+	def _maybe_send_close_fin(self):
+		if not self._close_pending:
+			return
+
+		if self._send_buffer or self.dst_staged_buffer:
+			return
+
+		self._close_pending = False
+		self._send_fin()
 
 	def _process_otherwise(self, packet: TCPPacket):
 		seg_seq = packet.seq_num
@@ -456,8 +521,26 @@ class TCPConnection:
 		fg_urg = packet.flags & TCPFlags.FG_URG
 		fg_fin = packet.flags & TCPFlags.FG_FIN
 
+		# RFC 9293 Figure 7 (MUST-10): simultaneous-open completion. Both peers
+		# entered SYN-RECEIVED from an active OPEN and have already consumed each
+		# other's bare SYN. The peer's SYN-ACK re-carries the SYN we consumed
+		# (SEG.SEQ == RCV.IRS == RCV.NXT - 1) plus the ACK of our SYN; only the
+		# ACK is meaningful, so route it to ACK processing instead of letting the
+		# sequence/SYN checks below drop or challenge it.
+		if (self.state == TCPState.STATE_SYN_RECEIVED and not self._passive_open and fg_syn and fg_ack
+			and seg_seq == self.recv_isn):
+			self._process_ack(packet)
+			return
+
 		# 1: check sequence number
 		if not self._segment_acceptable(seg_seq, seg_len):
+			if self.state == TCPState.STATE_TIME_WAIT and fg_fin and seg_seq == ((self.recv_nxt - 1) & 0xFFFFFFFF):
+				# RFC 9293 @ 3.10.7.4: a retransmitted FIN in TIME-WAIT restarts
+				# the 2*MSL time-wait timeout.
+				if self._timer_active("TIME_WAIT"):
+					self._cancel_timer("TIME_WAIT")
+					self._schedule_timer("TIME_WAIT", 2 * TCP_MSL * 1000)
+
 			if not fg_rst:
 				self._send_ack()
 
@@ -490,7 +573,15 @@ class TCPConnection:
 			if self.state in (TCPState.STATE_ESTABLISHED, TCPState.STATE_FIN_WAIT_1, TCPState.STATE_FIN_WAIT_2):
 				assert packet.urg_ptr is not None
 
-				self.recv_urg = max(self.recv_urg, packet.urg_ptr)
+				# RFC 9293 @ 3.8.5 (MUST-62): the urgent pointer is a positive
+				# offset from the segment's sequence number; RCV.UP tracks the
+				# absolute octet following the urgent data.
+				urgent = (packet.seq_num + packet.urg_ptr) & 0xFFFFFFFF
+				advances = self.recv_urg == 0 or self._seq_lt(self.recv_urg, urgent)
+
+				if advances:
+					self.recv_urg = urgent
+					self._events.fire_handler("urgent_data", (self.recv_urg, ))
 
 		# 7: process segment text
 		if packet.payload:
@@ -498,7 +589,7 @@ class TCPConnection:
 
 		# 8: check FIN bit
 		if fg_fin:
-			self._handle_fin()
+			self._handle_fin(packet)
 
 		if self._ack_needed:
 			if self._ack_immediate:
@@ -541,12 +632,20 @@ class TCPConnection:
 	def _process_ack(self, packet: TCPPacket):
 		seg_ack = packet.ack_num
 
-		if not self._seq_leq(self.send_una, seg_ack):
-			return
+		if self.state == TCPState.STATE_SYN_RECEIVED:
+			# RFC 9293 @ 3.10.7.4 step 5, SYN-RECEIVED STATE: ESTABLISHED is entered
+			# only when our SYN is acknowledged (SND.UNA < SEG.ACK =< SND.NXT);
+			# any other ACK forms <SEQ=SEG.ACK><CTL=RST> and is discarded.
+			if not (self._seq_lt(self.send_una, seg_ack) and self._seq_leq(seg_ack, self.send_nxt)):
+				self._enqueue_outbound(TCPPacket(flags = TCPFlags.FG_RST, seq_num = seg_ack))
+				return
+		else:
+			if not self._seq_leq(self.send_una, seg_ack):
+				return
 
-		if self._seq_lt(self.send_nxt, seg_ack):
-			self._send_ack()
-			return
+			if self._seq_lt(self.send_nxt, seg_ack):
+				self._send_ack()
+				return
 
 		acked_new = self._seq_lt(self.send_una, seg_ack)
 
@@ -576,22 +675,35 @@ class TCPConnection:
 		newer_segment = self._seq_lt(self.send_wnd_seq, packet.seq_num)
 		same_segment_newer_ack = self.send_wnd_seq == packet.seq_num and self._seq_leq(self.send_wnd_ack, seg_ack)
 
-		if newer_segment or same_segment_newer_ack:
-			assert packet.window, "packet.window was None"
+		window_was_zero = self.send_wnd == 0
 
+		if (newer_segment or same_segment_newer_ack) and packet.window is not None:
+			# A zero window is meaningful (RFC 9293 @ 3.8.6): it suspends sending.
 			self.send_wnd = packet.window << self._send_shift
 			self.send_wnd_seq = packet.seq_num
 			self.send_wnd_ack = seg_ack
+
+		if window_was_zero and self.send_wnd > 0:
+			# The peer's receive window opened: resume sending queued data and,
+			# if closing, finally emit the deferred FIN.
+			self._flush_send_buffer()
 
 		match self.state:
 			case TCPState.STATE_SYN_RECEIVED:
 				self.recv_wnd = self.recv_buff_max - len(self.recv_buffer)
 				self._cwnd = self._initial_window()
 				self._advance_state(TCPState.STATE_ESTABLISHED)
+				self._on_established()
 
 			case TCPState.STATE_FIN_WAIT_1:
-				if self.send_una == self.send_nxt:
-					self._advance_state(TCPState.STATE_FIN_WAIT_2)
+				# Our FIN may still be queued behind user data (_close_pending);
+				# only once it is sent and acknowledged do we leave FIN-WAIT-1.
+				if not self._close_pending and self.send_una == self.send_nxt:
+					if self._peer_fin_received:
+						self._advance_state(TCPState.STATE_TIME_WAIT)
+						self._schedule_timer("TIME_WAIT", 2 * TCP_MSL * 1000)
+					else:
+						self._advance_state(TCPState.STATE_FIN_WAIT_2)
 
 			case TCPState.STATE_CLOSING:
 				if self.send_una == self.send_nxt:
@@ -616,52 +728,123 @@ class TCPConnection:
 		seg_seq = packet.seq_num
 
 		if seg_seq == self.recv_nxt:
-			self.recv_buffer.extend(data)
-			self.recv_nxt = (self.recv_nxt + len(data)) & 0xFFFFFFFF
-			self._merge_out_of_order()
-
+			self._accept_receive_data(data)
 		elif self._seq_lt(self.recv_nxt, seg_seq):
 			self.recv_out_of_order.append((seg_seq, data))
 			self.recv_out_of_order.sort(key = lambda x: x[0])
 			self._ack_immediate = True
+		else:
+			# SEG.SEQ < RCV.NXT: the segment overlaps data already received.
+			# RFC 9293 @ 3.10.7.4: if the contents straddle the boundary between
+			# old and new, only the new parts are processed.
+			overlap = (self.recv_nxt - seg_seq) & 0xFFFFFFFF
 
-		free = self.recv_buff_max - len(self.recv_buffer)
+			if overlap < len(data):
+				self._accept_receive_data(data[overlap:])
 
-		if free >= min(self.recv_buff_max // 2, self.effective_send_mss):
-			self.recv_wnd = free
+		# RCV.WND tracks the actual free receive space, so it can drop to 0 once
+		# the receive buffer fills (RFC 9293 @ 3.8.6.2.2 MUST-39). Increases are
+		# advertised only once the SWS threshold is crossed (see event_receive).
+		self.recv_wnd = self.recv_buff_max - len(self.recv_buffer)
 
 		self._ack_needed = True
 
+	def _accept_receive_data(self, data):
+		# Accept in-order data but never buffer beyond recv_buff_max: the part
+		# that does not fit lies beyond our advertised window and will be
+		# retransmitted by the peer once space frees up.
+		space = self.recv_buff_max - len(self.recv_buffer)
+
+		if space <= 0:
+			return
+
+		if len(data) > space:
+			data = data[:space]
+
+		self.recv_buffer.extend(data)
+		self.recv_nxt = (self.recv_nxt + len(data)) & 0xFFFFFFFF
+		self._merge_out_of_order()
+
 	def _merge_out_of_order(self):
-		while self.recv_out_of_order:
+		while self.recv_out_of_order and len(self.recv_buffer) < self.recv_buff_max:
 			seq, data = self.recv_out_of_order[0]
 
 			if seq == self.recv_nxt:
-				self.recv_buffer.extend(data)
-				self.recv_nxt = (self.recv_nxt + len(data)) & 0xFFFFFFFF
+				space = self.recv_buff_max - len(self.recv_buffer)
+				chunk = data if len(data) <= space else data[:space]
+
+				self.recv_buffer.extend(chunk)
+				self.recv_nxt = (self.recv_nxt + len(chunk)) & 0xFFFFFFFF
 				self.recv_out_of_order.pop(0)
 
 			elif self._seq_lt(seq, self.recv_nxt):
 				overlap = (self.recv_nxt - seq) & 0xFFFFFFFF
 
 				if overlap < len(data):
-					self.recv_buffer.extend(data[overlap:])
-					self.recv_nxt = (self.recv_nxt + len(data) - overlap) & 0xFFFFFFFF
+					space = self.recv_buff_max - len(self.recv_buffer)
+					tail = data[overlap:]
+
+					if len(tail) > space:
+						tail = tail[:space]
+
+					if tail:
+						self.recv_buffer.extend(tail)
+						self.recv_nxt = (self.recv_nxt + len(tail)) & 0xFFFFFFFF
 
 				self.recv_out_of_order.pop(0)
 			else:
 				break
 
-	def _handle_fin(self):
+		self._maybe_consume_fin()
+
+	def _handle_fin(self, packet: TCPPacket):
+		# The FIN occupies the sequence number that follows this segment's payload.
+		fin_seq = (packet.seq_num + len(packet.payload or b"")) & 0xFFFFFFFF
+
+		if self._seq_lt(fin_seq, self.recv_nxt):
+			# Duplicate/old FIN: re-acknowledge only (RFC 9293 @ 3.10.7.4).
+			self._ack_needed = True
+			self._ack_immediate = True
+			return
+
+		if fin_seq != self.recv_nxt:
+			# Out-of-order FIN: hold it until every preceding octet has arrived so
+			# RCV.NXT is never advanced across a gap (RFC 9293 @ 3.10.7.4 SHLD-31).
+			self._recv_fin_seq = fin_seq
+			self._ack_needed = True
+			self._ack_immediate = True
+			return
+
+		self._recv_fin_seq = None
 		self.recv_nxt = (self.recv_nxt + 1) & 0xFFFFFFFF
 		self._ack_needed = True
 		self._ack_immediate = True
+
+		self._consume_fin_state()
+
+	def _maybe_consume_fin(self):
+		if self._recv_fin_seq is not None and self._recv_fin_seq == self.recv_nxt:
+			self._recv_fin_seq = None
+			self.recv_nxt = (self.recv_nxt + 1) & 0xFFFFFFFF
+			self._ack_needed = True
+			self._ack_immediate = True
+
+			self._consume_fin_state()
+
+	def _consume_fin_state(self):
+		self._peer_fin_received = True
 
 		match self.state:
 			case TCPState.STATE_SYN_RECEIVED | TCPState.STATE_ESTABLISHED:
 				self._advance_state(TCPState.STATE_CLOSE_WAIT)
 
 			case TCPState.STATE_FIN_WAIT_1:
+				if self._close_pending:
+					# Our FIN is still queued behind user data; finish sending it
+					# before moving on (the FIN_WAIT_1 ACK handler below will enter
+					# TIME-WAIT once our FIN is acknowledged).
+					return
+
 				self._advance_state(TCPState.STATE_CLOSING)
 
 			case TCPState.STATE_FIN_WAIT_2:
@@ -669,7 +852,8 @@ class TCPConnection:
 				self._schedule_timer("TIME_WAIT", 2 * TCP_MSL * 1000)
 
 			case TCPState.STATE_TIME_WAIT:
-				# @todo Phase 4: restart 2MSL timer
+				# A second in-order FIN cannot occur in TIME-WAIT; retransmitted
+				# FINs are handled by the sequence check in _process_otherwise.
 				pass
 
 	# --- Individual synchronized-state handlers ---
@@ -819,7 +1003,15 @@ class TCPConnection:
 		if self.send_wnd == 0:
 			return 0
 
-		return (self.send_una + self.send_wnd - self.send_nxt) & 0xFFFFFFFF
+		# RFC 9293 @ 3.8.6 (MUST-34): the usable window is bounded by the peer's
+		# right window edge; it becomes 0 (never wraps around) when the peer
+		# shrinks its window below our outstanding data.
+		right = (self.send_una + self.send_wnd) & 0xFFFFFFFF
+
+		if not self._seq_lt(self.send_nxt, right):
+			return 0
+
+		return (right - self.send_nxt) & 0xFFFFFFFF
 
 	def _nagle_ok(self, data_len: int) -> bool:
 		if not self._nagle_enabled:
@@ -832,6 +1024,16 @@ class TCPConnection:
 			return True
 
 		return False
+
+	@property
+	def nagle_enabled(self) -> bool:
+		# RFC 9293 @ 3.7.4 (MUST-17): the Nagle algorithm can be disabled per
+		# connection.
+		return self._nagle_enabled
+
+	@nagle_enabled.setter
+	def nagle_enabled(self, enabled: bool):
+		self._nagle_enabled = bool(enabled)
 
 	def _send_segment(self, data: bytes):
 		self._cancel_timer("DELAYED_ACK")
@@ -877,6 +1079,8 @@ class TCPConnection:
 
 		if self._send_buffer and self.send_wnd == 0 and not self._timer_active("ZERO_WINDOW_PROBE"):
 			self._schedule_timer("ZERO_WINDOW_PROBE", self._rto)
+
+		self._maybe_send_close_fin()
 
 	# --- Retransmission & congestion control (RFC 6298, RFC 5681) ---
 
@@ -926,6 +1130,16 @@ class TCPConnection:
 			return
 
 		seq, length, data, _, retrans_count, flags = self._in_flight[0]
+		retrans_count += 1
+
+		# RFC 9293 @ 3.8.3 (R2): close the connection once a segment has been
+		# retransmitted max_retransmissions times. A zero-window peer is not lost:
+		# only retransmissions against an open window - or of an unacknowledged
+		# SYN - count toward the abort.
+		if (self.max_retransmissions is not None and retrans_count >= self.max_retransmissions
+			and (flags & TCPFlags.FG_SYN or self.send_wnd > 0)):
+			self._abort_retransmit_timeout()
+			return
 
 		self._rto = min(self._rto * 2, 120000)
 		self._ssthresh = max(self._cwnd // 2, 2 * self.effective_send_mss)
@@ -946,8 +1160,20 @@ class TCPConnection:
 		self._events.fire_handler("retransmit")
 
 		send_time_ms = time_ms()
-		self._in_flight[0] = (seq, length, data, send_time_ms, retrans_count + 1, flags)
+		self._in_flight[0] = (seq, length, data, send_time_ms, retrans_count, flags)
 		self._schedule_timer("RTO", self._rto)
+
+	def _abort_retransmit_timeout(self):
+		# RFC 9293 @ 3.8.3: the R2 retransmission bound was reached; abort.
+		self._cancel_timer("RTO")
+		self._cancel_timer("DELAYED_ACK")
+		self._cancel_timer("ZERO_WINDOW_PROBE")
+		self._in_flight.clear()
+		self._send_buffer.clear()
+		self.dst_staged_buffer.clear()
+
+		self._events.fire_handler("connection_failed")
+		self._advance_state(TCPState.STATE_CLOSED)
 
 	def _fast_retransmit(self):
 		if not self._in_flight:
@@ -976,6 +1202,7 @@ class TCPConnection:
 
 	def _zero_window_probe(self):
 		if not self._send_buffer:
+			self._maybe_send_close_fin()
 			return
 
 		self._send_segment(bytes(self._send_buffer[:1]))
@@ -983,6 +1210,7 @@ class TCPConnection:
 
 		self._rto = min(self._rto * 2, 120000)
 		self._schedule_timer("ZERO_WINDOW_PROBE", self._rto)
+		self._maybe_send_close_fin()
 
 	# RFC 9293 @ 3.10.3
 	def event_receive(self, max_bytes: int) -> bytes:
@@ -1019,18 +1247,18 @@ class TCPConnection:
 				self._advance_state(TCPState.STATE_CLOSED)
 
 			case TCPState.STATE_SYN_RECEIVED:
-				self._send_fin()
+				self._begin_close()
 				self._advance_state(TCPState.STATE_FIN_WAIT_1)
 
 			case TCPState.STATE_ESTABLISHED:
-				self._send_fin()
+				self._begin_close()
 				self._advance_state(TCPState.STATE_FIN_WAIT_1)
 
 			case TCPState.STATE_FIN_WAIT_1 | TCPState.STATE_FIN_WAIT_2:
 				pass
 
 			case TCPState.STATE_CLOSE_WAIT:
-				self._send_fin()
+				self._begin_close()
 				self._advance_state(TCPState.STATE_LAST_ACK)
 
 			case TCPState.STATE_CLOSING | TCPState.STATE_LAST_ACK | TCPState.STATE_TIME_WAIT:
@@ -1088,9 +1316,9 @@ class TCPListener:
 		conn.recv_isn = packet.seq_num
 		conn.recv_wnd = conn.recv_buff_max
 
-		opt_ws = packet.opt_get(TCPOptionKind.OPT_WINDOW)
-		if opt_ws is not None:
-			conn._send_shift = opt_ws.window_scale
+		# Window scaling is not applied: we never advertise the Window Scale
+		# option, so it was not negotiated (RFC 7323 @ 2.2) and the peer's window
+		# fields must be decoded with a shift of 0.
 
 		opt_mss = packet.opt_get(TCPOptionKind.OPT_MSS)
 		if opt_mss is not None:

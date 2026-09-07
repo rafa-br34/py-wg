@@ -883,6 +883,523 @@ class UnitRetransmit(unittest.TestCase):
 		self.assertGreater(conn._rto, initial_rto, "RTO should double on retransmit")
 
 
+class UnitHandshakeIntegrity(unittest.TestCase):
+	"""Edge cases in the non-synchronized handshake states (RFC 9293 §3.10.7)."""
+	def _establish(self, conn: TCPConnection):
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 5000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
+			)
+		)
+		self.assertEqual(conn.state, TCPState.STATE_ESTABLISHED)
+
+	def test_stale_syn_removed_after_established(self):
+		"""The acknowledged SYN must leave the retransmission queue on ESTABLISHED."""
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		self.assertEqual(len(conn._in_flight), 1)
+		self.assertTrue(conn._timer_active("RTO"))
+
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 5000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
+			)
+		)
+		self.assertEqual(conn.state, TCPState.STATE_ESTABLISHED)
+		self.assertEqual(len(conn._in_flight), 0, "The ACKed SYN must be removed from _in_flight")
+		self.assertFalse(conn._timer_active("RTO"), "RTO must not stay armed for the dead SYN")
+
+	def test_rst_without_ack_in_syn_sent_dropped(self):
+		"""RFC 9293 §3.10.7.3: an RST without an acceptable ACK is dropped silently."""
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		conn.dst_retransmit.clear()
+
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_RST,
+				seq_num = 9999,
+				window = 0,
+			)
+		)
+
+		self.assertEqual(conn.state, TCPState.STATE_SYN_SENT)
+		self.assertEqual(len(conn.dst_retransmit), 0, "An RST must never provoke a reply")
+
+	def test_syn_received_unacceptable_ack_sends_rst(self):
+		"""RFC 9293 §3.10.7.4: SYN-RECEIVED promotes only on SND.UNA < ACK =< SND.NXT."""
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 80)
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 12345,
+				dst_port = 80,
+				flags = TCPFlags.FG_SYN,
+				seq_num = 5000,
+				window = 65535,
+			)
+		)
+		self.assertEqual(conn.state, TCPState.STATE_SYN_RECEIVED)
+		conn.dst_retransmit.clear()
+
+		# ACK == our ISN: our SYN was never acknowledged -> <SEQ=SEG.ACK><CTL=RST>
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 12345,
+				dst_port = 80,
+				flags = TCPFlags.FG_ACK,
+				seq_num = 6000,
+				ack_num = conn.send_isn,
+				window = 65535,
+			)
+		)
+
+		self.assertEqual(conn.state, TCPState.STATE_SYN_RECEIVED)
+		self.assertEqual(len(conn.dst_retransmit), 1)
+		rst = conn.dst_retransmit[0]
+		self.assertTrue(rst.flags & TCPFlags.FG_RST)
+		self.assertEqual(rst.seq_num, conn.send_isn)
+
+	def test_simultaneous_open_completes(self):
+		"""RFC 9293 Figure 7 (MUST-10): simultaneous open reaches ESTABLISHED."""
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		conn.dst_retransmit.clear()
+
+		# Peer B's bare SYN
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN,
+				seq_num = 9000,
+				window = 65535,
+			)
+		)
+		self.assertEqual(conn.state, TCPState.STATE_SYN_RECEIVED)
+		self.assertEqual(conn.recv_nxt, 9001)
+
+		# Peer B's SYN-ACK: re-carries the SYN we consumed, ACKs ours
+		conn.dst_retransmit.clear()
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 9000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
+			)
+		)
+
+		self.assertEqual(conn.state, TCPState.STATE_ESTABLISHED)
+		self.assertEqual(conn.recv_nxt, 9001)
+		self.assertEqual(conn.send_una, conn.send_isn + 1)
+
+
+class UnitSendPath(unittest.TestCase):
+	"""Queued data before ESTABLISHED and the FIN/close ordering rules."""
+	def _active_open(self) -> TCPConnection:
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		return conn
+
+	def _complete_handshake(self, conn: TCPConnection):
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 5000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
+			)
+		)
+		self.assertEqual(conn.state, TCPState.STATE_ESTABLISHED)
+
+	def test_data_staged_before_established_is_sent(self):
+		"""RFC 9293 §3.10.2: data queued pre-ESTABLISHED is transmitted after."""
+		conn = self._active_open()
+		conn.event_send(b"early data")
+		self.assertEqual(len(conn.dst_staged_buffer), 1)
+
+		self._complete_handshake(conn)
+
+		self.assertEqual(len(conn.dst_staged_buffer), 0)
+		self.assertTrue(
+			any(p.payload == b"early data" for p in conn.dst_retransmit),
+			"Pre-handshake data must be sent once ESTABLISHED"
+		)
+
+	def test_close_defers_fin_until_queued_data_sent(self):
+		"""RFC 9293 §3.10.4: the FIN follows, never precedes, queued SENDs."""
+		conn = self._active_open()
+		self._complete_handshake(conn)
+		conn.dst_retransmit.clear()
+		conn.send_wnd = 0 # window blocks all data
+		conn.event_send(b"Z" * 200)
+		conn.event_close()
+
+		self.assertEqual(conn.state, TCPState.STATE_FIN_WAIT_1)
+		self.assertEqual(len(conn._send_buffer), 200)
+		self.assertFalse(
+			any(p.flags & TCPFlags.FG_FIN for p in conn.dst_retransmit), "FIN must not overtake queued data"
+		)
+
+		# Peer reopens the window; data and then the FIN must go out in order.
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_ACK,
+				seq_num = 5001,
+				ack_num = conn.send_nxt,
+				window = 65535,
+			)
+		)
+
+		outbound = conn.dst_retransmit
+		data_packets = [p for p in outbound if p.payload]
+		fin_indexes = [i for i, p in enumerate(outbound) if p.flags & TCPFlags.FG_FIN]
+
+		self.assertEqual(len(conn._send_buffer), 0)
+		self.assertEqual(len(data_packets), 1)
+		self.assertEqual(data_packets[0].payload, b"Z" * 200)
+		self.assertEqual(len(fin_indexes), 1)
+		self.assertGreater(fin_indexes[0], 0, "The FIN must follow the data segment")
+
+	def test_fin_is_retransmitted(self):
+		"""RFC 9293 §3.6: a lost FIN is retransmitted by the RTO."""
+		conn = self._active_open()
+		self._complete_handshake(conn)
+		conn.event_close()
+		self.assertTrue(any(p.flags & TCPFlags.FG_FIN for p in conn.dst_retransmit))
+		self.assertTrue(conn._timer_active("RTO"), "RTO must be armed for the FIN")
+
+		conn.dst_retransmit.clear()
+		conn._fire_timer("RTO")
+		self.assertEqual(len(conn.dst_retransmit), 1)
+		self.assertTrue(conn.dst_retransmit[0].flags & TCPFlags.FG_FIN, "RTO must retransmit the FIN")
+
+
+class UnitReassembly(unittest.TestCase):
+	"""Receive-side reassembly: trimming, gaps, and out-of-order FINs."""
+	def _establish(self, conn: TCPConnection):
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 5000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
+			)
+		)
+		conn.recv_nxt = 6000 # pretend earlier contiguous data was consumed
+
+	def test_segment_straddling_rcv_nxt_is_trimmed(self):
+		"""RFC 9293 §3.10.7.4: only the new parts of a straddling segment are kept."""
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 5000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
+			)
+		)
+		conn.recv_nxt = 6000
+
+		conn._recv_packet(
+			TCPPacket(
+			src_port = 80,
+			dst_port = 12345,
+			flags = TCPFlags.FG_ACK,
+			seq_num = 5990, # 10 bytes already received
+			ack_num = conn.send_nxt,
+			window = 65535,
+			payload = b"X" * 110,
+			)
+		)
+
+		self.assertEqual(conn.recv_nxt, 6100)
+		self.assertEqual(bytes(conn.recv_buffer), b"X" * 100, "Only the new tail (100 bytes) must be accepted")
+
+	def test_out_of_order_fin_held_until_contiguous(self):
+		"""An out-of-order FIN must not advance RCV.NXT across a gap."""
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 5000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
+			)
+		)
+		conn.recv_nxt = 6000
+
+		# data 6150..6199 + FIN(6200) arrives before 6000..6149
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_ACK | TCPFlags.FG_FIN,
+				seq_num = 6150,
+				ack_num = conn.send_nxt,
+				window = 65535,
+				payload = b"D" * 50,
+			)
+		)
+		self.assertEqual(conn.state, TCPState.STATE_ESTABLISHED, "The connection must not close over a gap")
+		self.assertEqual(conn.recv_nxt, 6000)
+		self.assertEqual(conn._recv_fin_seq, 6200)
+
+		# The missing earlier data now arrives in order
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_ACK,
+				seq_num = 6000,
+				ack_num = conn.send_nxt,
+				window = 65535,
+				payload = b"E" * 150,
+			)
+		)
+
+		self.assertEqual(conn.state, TCPState.STATE_CLOSE_WAIT)
+		self.assertEqual(conn.recv_nxt, 6201, "RCV.NXT covers data and FIN only once contiguous")
+		self.assertEqual(bytes(conn.recv_buffer), b"E" * 150 + b"D" * 50)
+
+
+class UnitWindowManagement(unittest.TestCase):
+	"""Window scaling, window shrinking, and zero-window flow control."""
+	def _active_open(self) -> TCPConnection:
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		return conn
+
+	def _complete_handshake(self, conn: TCPConnection):
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 5000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
+			)
+		)
+		self.assertEqual(conn.state, TCPState.STATE_ESTABLISHED)
+
+	def test_window_scale_not_applied_without_negotiation(self):
+		"""RFC 7323 §2.2: peer window fields are unscaled unless WS was negotiated."""
+		conn = self._active_open()
+
+		syn_ack = TCPPacket(
+			src_port = 80,
+			dst_port = 12345,
+			flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+			seq_num = 5000,
+			ack_num = conn.send_isn + 1,
+			window = 100,
+		)
+		syn_ack.opt_set(TCPOptionKind.OPT_WINDOW, window_scale = 7)
+		conn._recv_packet(syn_ack)
+
+		self.assertEqual(conn.state, TCPState.STATE_ESTABLISHED)
+		self.assertEqual(conn.send_wnd, 100, "The window must not be scaled by 2^7")
+
+	def test_window_shrink_usable_window_zero(self):
+		"""RFC 9293 §3.8.6 (MUST-34): shrinking the window never wraps usable space."""
+		conn = self._active_open()
+		self._complete_handshake(conn)
+
+		conn.send_una = 1000
+		conn.send_nxt = 1600 # 600 bytes outstanding
+		conn.send_wnd = 500 # shrunk below outstanding data
+
+		self.assertEqual(conn._send_window_available(), 0, "The usable window must clamp to zero, not wrap to ~2^32")
+
+	def test_receive_buffer_bounded_and_window_reaches_zero(self):
+		"""RFC 9293 §3.8.6.2.2 (MUST-39): RCV.WND reaches 0 and recv_buff_max is enforced."""
+		conn = self._active_open()
+		self._complete_handshake(conn)
+
+		payload = b"A" * 536
+		seq = 5001
+
+		while len(conn.recv_buffer) + len(payload) <= conn.recv_buff_max:
+			conn._recv_packet(
+				TCPPacket(
+					src_port = 80,
+					dst_port = 12345,
+					flags = TCPFlags.FG_ACK,
+					seq_num = seq,
+					ack_num = conn.send_nxt,
+					window = 65535,
+					payload = payload,
+				)
+			)
+			seq = (seq + len(payload)) & 0xFFFFFFFF
+
+		# A further segment (in-window when it was sent) must not exceed the cap
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_ACK,
+				seq_num = seq,
+				ack_num = conn.send_nxt,
+				window = 65535,
+				payload = b"B" * 536,
+			)
+		)
+
+		self.assertLessEqual(
+			len(conn.recv_buffer), conn.recv_buff_max, "The receive buffer must never exceed recv_buff_max"
+		)
+
+
+class UnitTimeoutAndUrgent(unittest.TestCase):
+	"""R2 retransmission timeout, per-connection Nagle control, urgent data."""
+	def _established(self) -> TCPConnection:
+		conn = TCPConnection()
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_SYN | TCPFlags.FG_ACK,
+				seq_num = 5000,
+				ack_num = conn.send_isn + 1,
+				window = 65535,
+			)
+		)
+		self.assertEqual(conn.state, TCPState.STATE_ESTABLISHED)
+		return conn
+
+	def test_nagle_disabled_per_connection(self):
+		"""RFC 9293 @ 3.7.4 (MUST-17): Nagle can be disabled per connection."""
+		off = self._established()
+		off.nagle_enabled = False
+		off.event_send(b"A" * 10)
+		off.event_send(b"B" * 10)
+		data_off = [p for p in off.dst_retransmit if p.payload]
+		self.assertEqual(len(data_off), 2, "Small segments must go out immediately with Nagle off")
+
+		on = self._established()
+		on.event_send(b"A" * 10)
+		on.event_send(b"B" * 10)
+		data_on = [p for p in on.dst_retransmit if p.payload]
+		self.assertEqual(len(data_on), 1, "The second small segment must wait for an ACK with Nagle on")
+
+	def test_retransmit_timeout_aborts(self):
+		"""RFC 9293 @ 3.8.3 (R2): too many retransmissions abort the connection."""
+		conn = self._established()
+		conn.max_retransmissions = 2
+		conn.event_send(b"X" * 100)
+
+		failed = []
+		conn.on_connection_failed(lambda: failed.append(1))
+
+		for _ in range(4):
+			if conn._timer_active("RTO"):
+				conn._fire_timer("RTO")
+
+		self.assertEqual(conn.state, TCPState.STATE_CLOSED)
+		self.assertEqual(len(failed), 1, "connection_failed must fire once on abort")
+		self.assertEqual(len(conn._in_flight), 0)
+
+	def test_zero_window_stall_not_aborted(self):
+		"""A zero-window peer is alive: retransmission counting must not abort it."""
+		conn = self._established()
+		conn.max_retransmissions = 2
+		conn.send_wnd = 0
+		conn.event_send(b"Y" * 100)
+
+		for _ in range(5):
+			if conn._timer_active("RTO"):
+				conn._fire_timer("RTO")
+
+		self.assertEqual(conn.state, TCPState.STATE_ESTABLISHED)
+
+	def test_syn_timeout_aborts(self):
+		"""A SYN to a black hole aborts after max_retransmissions (MUST-23 shape)."""
+		conn = TCPConnection()
+		conn.max_retransmissions = 2
+		conn.event_open(0x0A000001, 12345, 0x0A000002, 80)
+		conn.dst_retransmit.clear()
+
+		failed = []
+		conn.on_connection_failed(lambda: failed.append(1))
+
+		for _ in range(4):
+			if conn._timer_active("RTO"):
+				conn._fire_timer("RTO")
+
+		self.assertEqual(conn.state, TCPState.STATE_CLOSED)
+		self.assertEqual(len(failed), 1)
+
+	def test_urgent_pointer_absolute_and_notified(self):
+		"""RFC 9293 @ 3.8.5: RCV.UP is absolute and urgent data is notified."""
+		conn = self._established()
+
+		urgent = []
+		conn.on_urgent_data(lambda ptr: urgent.append(ptr))
+
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_ACK | TCPFlags.FG_URG,
+				seq_num = 5001,
+				ack_num = conn.send_nxt,
+				window = 65535,
+				urg_ptr = 5,
+			)
+		)
+
+		self.assertEqual(conn.recv_urg, 5006, "RCV.UP must be the absolute sequence number")
+		self.assertEqual(urgent, [5006], "An urgent notification must fire on advance")
+
+		# A lower urgent pointer must not downgrade RCV.UP nor fire again
+		conn._recv_packet(
+			TCPPacket(
+				src_port = 80,
+				dst_port = 12345,
+				flags = TCPFlags.FG_ACK | TCPFlags.FG_URG,
+				seq_num = 5002,
+				ack_num = conn.send_nxt,
+				window = 65535,
+				urg_ptr = 1,
+			)
+		)
+
+		self.assertEqual(conn.recv_urg, 5006)
+		self.assertEqual(urgent, [5006])
+
+
 class UnitTCPPacketEncodeDecode(unittest.TestCase):
 	"""Round-trip encode/decode for tcp_pkt."""
 	def test_syn_encode_decode(self):
@@ -971,5 +1488,10 @@ UNIT_CLASSES = [
 	UnitListener,
 	UnitEvents,
 	UnitRetransmit,
+	UnitHandshakeIntegrity,
+	UnitSendPath,
+	UnitReassembly,
+	UnitWindowManagement,
+	UnitTimeoutAndUrgent,
 	UnitTCPPacketEncodeDecode,
 ]

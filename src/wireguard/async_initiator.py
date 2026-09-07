@@ -1,12 +1,26 @@
 import asyncio
 import queue
-import time
+import socket
+import struct
 
 from typing import Optional
 
 from .initiator import Initiator
 from .functions import WireguardPubKey, WireguardPriKey
-from .constants import STATE_REKEY_TIMEOUT, STATE_REKEY_ATTEMPT_TIME
+from .constants import STATE_REKEY_ATTEMPT_TIME
+
+
+def _endpoint_bytes(address: tuple[str, int]) -> Optional[bytes]:
+	"""WireGuard cookie inputs bind to the source IP + UDP port (paper §5.4.7)."""
+	ip, port = address
+
+	try:
+		family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+		packed_ip = socket.inet_pton(family, ip)
+	except OSError:
+		return None
+
+	return packed_ip + struct.pack(">H", port)
 
 
 class _WGProtocol(asyncio.DatagramProtocol):
@@ -48,8 +62,14 @@ class AsyncInitiator(Initiator):
 		*,
 		rx_queue_size: int = 1024,
 		tx_queue_size: int = 1024,
+		max_handshake_attempts: Optional[int] = None,
 	):
-		super().__init__(initiator_pri, responder_pub, preshared_key)
+		super().__init__(
+			initiator_pri,
+			responder_pub,
+			preshared_key,
+			max_handshake_attempts = max_handshake_attempts,
+		)
 
 		self._rx_queue: asyncio.Queue = asyncio.Queue(maxsize = rx_queue_size)
 		self._rx_queue_threadsafe: queue.Queue = queue.Queue(maxsize = rx_queue_size)
@@ -59,6 +79,7 @@ class AsyncInitiator(Initiator):
 		self._protocol = None
 		self._loop_task: Optional[asyncio.Task] = None
 		self._running = False
+		self._server_address_bytes = None
 
 	async def start(self, server_addr: tuple[str, int]):
 		"""Bind a UDP socket to *server_addr* and start the background send/recv loop.
@@ -71,12 +92,15 @@ class AsyncInitiator(Initiator):
 
 		loop = asyncio.get_running_loop()
 
+		# Cookie replies are bound to the peer's source address (wireguard.pdf §5.4.7).
+		self._server_address_bytes = _endpoint_bytes(server_addr)
+
 		def on_datagram(data, addr):
 			# Only accept datagrams from the configured server
 			if addr != server_addr:
 				return
 			try:
-				decoded = self.decode_packet(data)
+				decoded = self.decode_packet(data, self._server_address_bytes)
 			except Exception:
 				return
 			if decoded is not None:
@@ -98,9 +122,9 @@ class AsyncInitiator(Initiator):
 		self._loop_task = asyncio.create_task(self._run_loop(server_addr))
 
 		# Trigger the initial handshake immediately if we aren't already connected
-		if not self.state_connected and self.state_reconnect_begin is None:
-			self.state_reconnect_begin = time.monotonic()
-			self.state_reconnect_timer = time.monotonic() - STATE_REKEY_TIMEOUT
+		# (also re-arms after max_handshake_attempts gave up).
+		if not self.state_connected:
+			self.request_handshake()
 
 	async def stop(self):
 		"""Stop the background loop and close the UDP socket."""
@@ -159,10 +183,8 @@ class AsyncInitiator(Initiator):
 		``state_connected`` or ``on_handshake_complete`` before sending).
 		"""
 		if not self.state_connected:
-			# Ensure a handshake is in progress
-			if self.state_reconnect_begin is None and self.state_rekey_begin is None:
-				self.state_reconnect_begin = time.monotonic()
-				self.state_reconnect_timer = time.monotonic() - STATE_REKEY_TIMEOUT
+			# Explicit user send: re-arm the handshake (also after a give-up, §6.4).
+			self.request_handshake()
 
 			return
 

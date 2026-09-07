@@ -8,7 +8,11 @@ from src.wireguard import Initiator, AsyncInitiator, Handshake
 from src.wireguard.constants import (
 	STATE_KEEPALIVE_TIMEOUT,
 	STATE_REKEY_TIMEOUT,
+	STATE_REKEY_AFTER_TIME,
+	STATE_REJECT_AFTER_TIME_RX,
+	STATE_REJECT_AFTER_MSGS,
 )
+from src.wireguard.exceptions import WireguardException
 from src.wireguard.functions import wg_pad
 
 # ---------------------------------------------------------------------------
@@ -47,22 +51,37 @@ def _complete_handshake_pair(
 	initiator: Initiator,
 	responder: Initiator,
 ):
-	"""Perform a handshake between two peers.  After this both are connected.
+	"""Perform a handshake between two peers.
 
 	*initiator* must know *responder*'s public key.  *responder* must NOT know
-	*initiator*'s public key (it learns it from the handshake).
+	*initiator*'s public key (it learns it from the handshake). After this the
+	initiator is connected; the responder session is pending until confirmed by
+	the initiator's first transport data message (§6.3) - see
+	_confirm_responder_session.
 	"""
 	initiator._stage_handshake_req()
 	req = initiator.staged_outbound.popleft()
 
 	# Feed the request through the responder's decode_packet so that key
 	# rotation happens on the responder side as well.
-	responder.state_rekey_staged = True
 	responder.decode_packet(req)
 	res = responder.staged_outbound.popleft()
 
-	initiator.state_rekey_staged = True
 	initiator.decode_packet(res)
+
+
+def _confirm_responder_session(initiator: Initiator, responder: Initiator):
+	"""Confirm a responder-side session with the initiator's first transport data.
+
+	wireguard.pdf §6.3: the responder cannot use (or send on) the new session
+	until it has received the initiator's first authenticated transport message.
+	"""
+	initiator.encode_transport(b"")
+	pkt = initiator.staged_outbound.popleft()
+
+	responder.decode_packet(pkt)
+
+	assert responder.state_connected, "Responder session must be confirmed after the first transport message"
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +161,7 @@ class UnitEvents(unittest.TestCase):
 		responder.handshake.initiator = False
 
 		_complete_handshake_pair(initiator, responder)
+		_confirm_responder_session(initiator, responder)
 
 		called = []
 		initiator.on_message_rx(lambda data: called.append(data))
@@ -162,6 +182,7 @@ class UnitEvents(unittest.TestCase):
 		responder.handshake.initiator = False
 
 		_complete_handshake_pair(initiator, responder)
+		_confirm_responder_session(initiator, responder)
 
 		called = []
 		initiator.on_keepalive_rx(lambda: called.append(1))
@@ -431,8 +452,298 @@ class UnitAsyncInitiatorIntegration(unittest.IsolatedAsyncioTestCase):
 		self.assertFalse(result)
 
 
+# ---------------------------------------------------------------------------
+# UnitTransportSecurity: receive-path hardening (paper §5.4.6, §6.5)
+# ---------------------------------------------------------------------------
+
+
+class UnitTransportSecurity(unittest.TestCase):
+	def setUp(self):
+		responder_pri, responder_pub = _make_responder_keys()
+		initiator_pri = NaClPrivateKey.generate()
+		self.initiator = Initiator(initiator_pri, responder_pub)
+		self.responder = Initiator(responder_pri, initiator_pri.public_key)
+		self.responder.handshake.initiator = False
+
+		_complete_handshake_pair(self.initiator, self.responder)
+		_confirm_responder_session(self.initiator, self.responder)
+
+	def test_forged_packet_does_not_poison_replay_window(self):
+		"""§5.4.6: the replay window is only advanced by authenticated messages."""
+		self.responder.encode_transport(b"hello")
+		genuine = bytearray(self.responder.staged_outbound.popleft())
+		forged = bytearray(genuine)
+		forged[-1] ^= 0xFF # corrupt the AEAD tag/ciphertext
+
+		with self.assertRaises(Exception):
+			self.initiator.decode_packet(bytes(forged))
+
+		# The genuine message with the same counter must still be accepted
+		self.assertIsNotNone(self.initiator.decode_packet(bytes(genuine)))
+
+	def test_counter_at_reject_after_messages_is_refused(self):
+		"""§5.4.6: counters at/above Reject-After-Messages are refused."""
+		self.responder.encode_transport(b"hi")
+		pkt = bytearray(self.responder.staged_outbound.popleft())
+
+		# Rewrite the 64-bit counter (bytes 8..16) to REJECT_AFTER_MSGS
+		pkt[8:16] = STATE_REJECT_AFTER_MSGS.to_bytes(8, "little")
+
+		with self.assertRaises(WireguardException):
+			self.initiator.decode_packet(bytes(pkt))
+
+	def test_authenticated_data_revives_disconnected_peer(self):
+		"""§6.5: valid transport data proves the peer alive and clears reconnect."""
+		self.initiator.state_connected = False
+		self.initiator.state_reconnect_begin = 123.0
+		self.initiator.state_reconnect_timer = 123.0
+
+		self.responder.encode_transport(b"still here")
+		pkt = self.responder.staged_outbound.popleft()
+		self.initiator.decode_packet(pkt)
+
+		self.assertTrue(self.initiator.state_connected)
+		self.assertIsNone(self.initiator.state_reconnect_begin)
+		self.assertEqual(self.initiator.state_reconnect_timer, 0)
+
+
+# ---------------------------------------------------------------------------
+# UnitRekeyLogic: §6.2 rekey triggers live on the send/receive paths
+# ---------------------------------------------------------------------------
+
+
+class UnitRekeyLogic(unittest.TestCase):
+	def setUp(self):
+		self._real_monotonic = time.monotonic
+		self._clock = 0.0
+		time.monotonic = lambda: self._clock
+
+		responder_pri, responder_pub = _make_responder_keys()
+		initiator_pri = NaClPrivateKey.generate()
+		self.initiator = Initiator(initiator_pri, responder_pub)
+		self.responder = Initiator(responder_pri, initiator_pri.public_key)
+		self.responder.handshake.initiator = False
+
+		_complete_handshake_pair(self.initiator, self.responder)
+		_confirm_responder_session(self.initiator, self.responder)
+
+	def tearDown(self):
+		time.monotonic = self._real_monotonic
+
+	def test_idle_ticks_do_not_trigger_rekey(self):
+		"""§6.2: rekey is not armed by clock ticks alone on an idle session."""
+		self._clock += STATE_REKEY_AFTER_TIME + 60 # well past Rekey-After-Time
+		list(self.initiator.update_state())
+		list(self.responder.update_state())
+
+		self.assertIsNone(self.initiator.state_rekey_begin)
+		self.assertEqual(len(self.initiator.staged_outbound), 0)
+
+	def test_send_path_triggers_rekey(self):
+		"""§6.2: sending on a session older than Rekey-After-Time arms a rekey."""
+		self._clock += STATE_REKEY_AFTER_TIME + 1
+
+		self.initiator.encode_transport(b"poke")
+
+		self.assertIsNotNone(self.initiator.state_rekey_begin)
+
+	def test_receive_path_triggers_rekey(self):
+		"""§6.2: receiving on an old session arms the receive-path rekey once."""
+		self._clock += STATE_REJECT_AFTER_TIME_RX + 1
+
+		self.responder.encode_transport(b"poke")
+		pkt = self.responder.staged_outbound.popleft()
+		self.initiator.decode_packet(pkt)
+
+		self.assertIsNotNone(self.initiator.state_rekey_begin)
+
+	def test_responder_role_never_time_rekeys(self):
+		"""§6.2: time-based rekeying is restricted to the session initiator."""
+		self._clock += STATE_REKEY_AFTER_TIME + 10
+
+		self.responder.encode_transport(b"poke") # responder sending -> no rekey arm
+
+		self.assertIsNone(self.responder.state_rekey_begin)
+
+
+# ---------------------------------------------------------------------------
+# UnitResponderPolicy: responder identity, under-load cookies, and rekeys
+# ---------------------------------------------------------------------------
+
+
+class UnitResponderPolicy(unittest.TestCase):
+	def _make_pair(self):
+		"""Build a responder-mode peer and the initiator it is configured for."""
+		responder_pri, responder_pub = _make_responder_keys()
+		initiator_pri = NaClPrivateKey.generate()
+		initiator = Initiator(initiator_pri, responder_pub)
+		responder = Initiator(responder_pri, initiator_pri.public_key)
+		responder.handshake.initiator = False
+		return initiator, responder, responder_pub
+
+	def test_unknown_initiator_identity_is_ignored(self):
+		"""5.1: a responder must not answer initiations from unknown identities."""
+		_, responder, responder_pub = self._make_pair()
+
+		# An attacker knows the responder's public key and forges an initiation.
+		attacker = Initiator(NaClPrivateKey.generate(), responder_pub)
+		attacker._stage_handshake_req()
+		forged = attacker.staged_outbound.popleft()
+
+		responder.decode_packet(forged)
+
+		self.assertEqual(len(responder.staged_outbound), 0, "No response to an unknown identity")
+		self.assertFalse(responder.state_connected)
+		self.assertEqual(responder.next_keypair.send_key, b"", "No session must be derived")
+
+		# The legitimate peer still works afterwards.
+		legit, responder, _ = self._make_pair()
+		legit._stage_handshake_req()
+		req = legit.staged_outbound.popleft()
+		responder.decode_packet(req)
+		self.assertEqual(len(responder.staged_outbound), 1, "Legitimate initiation must be answered")
+
+	def test_not_under_load_accepts_without_mac2(self):
+		"""5.3: a valid MAC 1 is sufficient while not under load."""
+		initiator, responder, _ = self._make_pair()
+
+		initiator._stage_handshake_req()
+		req = initiator.staged_outbound.popleft()
+		self.assertEqual(req[-16:], b"\x00" * 16, "No cookie yet: MAC 2 is empty")
+
+		responder.decode_packet(req)
+
+		self.assertEqual(len(responder.staged_outbound), 1, "Initiation must be processed")
+		self.assertTrue(responder.staged_outbound[0][0] == 0x02)
+
+	def test_under_load_answers_with_cookie_reply(self):
+		"""5.4.7: under load a missing/invalid MAC 2 is answered with a cookie reply."""
+		initiator, responder, _ = self._make_pair()
+		responder.under_load = True
+
+		initiator._stage_handshake_req()
+		req = initiator.staged_outbound.popleft()
+		address = b"\x0a\x00\x00\x01\x94\x6c" # 10.0.0.1:38028
+
+		responder.decode_packet(req, address)
+
+		self.assertEqual(len(responder.staged_outbound), 1)
+		self.assertTrue(responder.staged_outbound[0][0] == 0x03, "Expected a cookie reply under load")
+
+		# The initiator consumes the cookie and retries with a valid MAC 2.
+		initiator.decode_packet(responder.staged_outbound.popleft())
+		initiator._stage_handshake_req()
+		req2 = initiator.staged_outbound.popleft()
+		self.assertNotEqual(req2[-16:], b"\x00" * 16, "MAC 2 must now be present")
+
+		responder.decode_packet(req2, address)
+		self.assertEqual(len(responder.staged_outbound), 1)
+		self.assertTrue(responder.staged_outbound[0][0] == 0x02, "Cookie-authenticated initiation must be answered")
+
+	def test_healthy_responder_answers_peer_rekey(self):
+		"""6.2/6.3: a session's responder answers its initiator's rekey at any time."""
+		initiator, responder, _ = self._make_pair()
+
+		_complete_handshake_pair(initiator, responder)
+		_confirm_responder_session(initiator, responder)
+
+		# The session initiator starts a rekey while the responder is healthy.
+		initiator._stage_handshake_req()
+		req = initiator.staged_outbound.popleft()
+
+		responder.decode_packet(req)
+		self.assertEqual(len(responder.staged_outbound), 1, "Healthy responder must answer the rekey")
+		res = responder.staged_outbound.popleft()
+
+		# Initiator promotes its new session; responder's copy is confirmed by the
+		# first transport data message of the new session (6.3).
+		initiator.decode_packet(res)
+
+		initiator.encode_transport(b"rekeyed")
+		pkt = initiator.staged_outbound.popleft()
+		responder.decode_packet(pkt)
+		self.assertTrue(responder.state_connected)
+
+		called = []
+		initiator.on_message_rx(lambda data: called.append(data))
+		responder.encode_transport(b"reply")
+		pkt = responder.staged_outbound.popleft()
+		initiator.decode_packet(pkt)
+		self.assertEqual(called, [wg_pad(b"reply")])
+
+
+# ---------------------------------------------------------------------------
+# UnitHandshakeRetryOption: bounded handshake retries (F6 user option)
+# ---------------------------------------------------------------------------
+
+
+class UnitHandshakeRetryOption(unittest.TestCase):
+	def setUp(self):
+		self._real_monotonic = time.monotonic
+		self._clock = 0.0
+		time.monotonic = lambda: self._clock
+
+		responder_pri, responder_pub = _make_responder_keys()
+		initiator_pri = NaClPrivateKey.generate()
+		self.peer = Initiator(initiator_pri, responder_pub, max_handshake_attempts = 2)
+		self.peer.request_handshake()
+
+	def tearDown(self):
+		time.monotonic = self._real_monotonic
+
+	def _tick(self, delta = 8.0): # > Rekey-Timeout + max jitter
+		self._clock += delta
+		return list(self.peer.update_state())
+
+	def test_gives_up_after_configured_attempts(self):
+		failed = []
+		self.peer.on_handshake_failed(lambda: failed.append(1))
+
+		packets = []
+		packets += self._tick() # attempt 1
+		packets += self._tick() # attempt 2
+		packets += self._tick() # give-up fires here
+		packets += self._tick()
+		packets += self._tick()
+
+		self.assertEqual(len(failed), 1, "handshake_failed must fire exactly once")
+		self.assertTrue(self.peer.state_handshake_gave_up)
+		self.assertEqual(len(packets), 2, "No initiations may be sent after giving up")
+
+	def test_default_never_gives_up(self):
+		responder_pri, responder_pub = _make_responder_keys()
+		peer = Initiator(NaClPrivateKey.generate(), responder_pub)
+		peer.request_handshake()
+
+		sent = 0
+		for _ in range(5):
+			sent += len(self._collect(peer))
+		self.assertFalse(peer.state_handshake_gave_up)
+		self.assertGreaterEqual(sent, 5)
+
+	def _collect(self, peer):
+		self._clock += 8.0
+		return list(peer.update_state())
+
+	def test_request_handshake_rearms_after_give_up(self):
+		self._tick()
+		self._tick()
+		self._tick() # gave up
+		self.assertTrue(self.peer.state_handshake_gave_up)
+
+		self.peer.request_handshake()
+		self.assertFalse(self.peer.state_handshake_gave_up)
+
+		packets = self._tick()
+		self.assertEqual(len(packets), 1, "A fresh handshake attempt must be staged after re-arming")
+
+
 UNIT_CLASSES = [
 	UnitEvents,
 	UnitAsyncInitiator,
 	UnitAsyncInitiatorIntegration,
+	UnitTransportSecurity,
+	UnitRekeyLogic,
+	UnitResponderPolicy,
+	UnitHandshakeRetryOption,
 ]
